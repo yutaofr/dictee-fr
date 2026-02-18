@@ -1,0 +1,14 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8081:3001"
+    volumes:
+      - ./index.html:/app/index.html:ro
+      - ./style.css:/app/style.css:ro
+      - ./app.js:/app/app.js:ro
+      - ./dictees.js:/app/dictees.js:ro
+      - ./server.js:/app/server.js:ro
+    environment:
+      - PORT=3001
+      - TTS_SERVER_URL=http://host.docker.internal:8000

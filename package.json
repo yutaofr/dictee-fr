@@ -1,0 +1,13 @@
+{
+  "name": "dictee-brevet-2026",
+  "version": "1.0.0",
+  "description": "Simulateur de dictée Brevet 2026 avec TTS Qwen3-TTS",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  }
+}

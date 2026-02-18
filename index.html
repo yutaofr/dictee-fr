@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Simulateur de dictée pour le Brevet 2026 — Entraînez-vous avec des textes de niveau 3ème et une lecture TTS fidèle au protocole officiel.">
+  <title>Dictée Brevet 2026 — Simulateur d'examen</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ========== HEADER ========== -->
+  <header id="app-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">📝</span>
+        <div>
+          <h1>Dictée Brevet 2026</h1>
+          <p class="subtitle">Simulateur d'examen — Français 3ème</p>
+        </div>
+      </div>
+      <nav id="main-nav">
+        <button class="nav-btn active" data-section="accueil" id="nav-accueil">
+          <span class="nav-icon">🏠</span> Accueil
+        </button>
+        <button class="nav-btn" data-section="examen" id="nav-examen" disabled>
+          <span class="nav-icon">🎧</span> Examen
+        </button>
+        <button class="nav-btn" data-section="correction" id="nav-correction" disabled>
+          <span class="nav-icon">✅</span> Correction
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ========== SECTION: ACCUEIL ========== -->
+  <main>
+    <section id="section-accueil" class="section active">
+      <div class="container">
+        <div class="welcome-card glass">
+          <h2>Bienvenue dans le simulateur de dictée</h2>
+          <p>Préparez-vous à l'épreuve de dictée du Brevet des collèges. Choisissez un sujet ci-dessous pour commencer une simulation fidèle au protocole officiel.</p>
+          <div class="protocol-info">
+            <div class="protocol-step">
+              <span class="step-number">1</span>
+              <div>
+                <strong>Lecture intégrale</strong>
+                <p>Écoutez le texte sans écrire. Comprenez le sens général.</p>
+              </div>
+            </div>
+            <div class="protocol-step">
+              <span class="step-number">2</span>
+              <div>
+                <strong>Dictée</strong>
+                <p>Le texte est lu phrase par phrase. Chaque groupe est lu deux fois.</p>
+              </div>
+            </div>
+            <div class="protocol-step">
+              <span class="step-number">3</span>
+              <div>
+                <strong>Relecture</strong>
+                <p>Dernière écoute complète. Relisez et corrigez votre copie.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="section-title">Choisissez votre dictée</h3>
+        <div id="dictee-grid" class="dictee-grid">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== SECTION: EXAMEN ========== -->
+    <section id="section-examen" class="section">
+      <div class="container">
+        <!-- Phase indicator bar -->
+        <div id="phase-bar" class="phase-bar glass">
+          <div class="phase-info">
+            <span id="phase-icon" class="phase-icon">🔊</span>
+            <div>
+              <h2 id="phase-title">Lecture intégrale</h2>
+              <p id="phase-description">Écoutez attentivement sans écrire.</p>
+            </div>
+          </div>
+          <div class="phase-progress">
+            <div class="phase-dots">
+              <span class="phase-dot active" data-phase="lecture1" title="Lecture intégrale"></span>
+              <span class="phase-dot" data-phase="dictee" title="Dictée"></span>
+              <span class="phase-dot" data-phase="relecture" title="Relecture"></span>
+            </div>
+            <span id="phase-counter" class="phase-counter"></span>
+          </div>
+        </div>
+
+        <!-- Current word highlight -->
+        <div id="current-word-display" class="current-word-display glass" style="display: none;">
+          <span id="current-word-label" class="current-word-label">Groupe actuel :</span>
+          <p id="current-word-text" class="current-word-text"></p>
+          <span id="repeat-indicator" class="repeat-indicator"></span>
+        </div>
+
+        <!-- TTS Voice selector -->
+        <div id="voice-selector" class="voice-selector glass">
+          <label for="voice-select">Voix :</label>
+          <select id="voice-select"></select>
+          <label for="speed-range" class="speed-label">Vitesse :</label>
+          <input type="range" id="speed-range" min="0.5" max="1.2" step="0.05" value="0.9">
+          <span id="speed-value">0.9×</span>
+        </div>
+
+        <!-- Controls -->
+        <div class="exam-controls">
+          <button id="btn-start" class="btn btn-primary btn-large">
+            <span>▶️</span> Commencer la dictée
+          </button>
+          <button id="btn-pause" class="btn btn-secondary" style="display:none;">
+            <span>⏸️</span> Pause
+          </button>
+          <button id="btn-resume" class="btn btn-primary" style="display:none;">
+            <span>▶️</span> Reprendre
+          </button>
+          <button id="btn-skip-phase" class="btn btn-outline" style="display:none;">
+            <span>⏭️</span> Phase suivante
+          </button>
+          <button id="btn-finish" class="btn btn-accent" style="display:none;">
+            <span>✅</span> Passer à la correction
+          </button>
+        </div>
+
+        <!-- Writing area (during dictée phase) -->
+        <div id="writing-area" class="writing-area" style="display:none;">
+          <h3>Votre dictée</h3>
+          <p class="hint">Écrivez ici pendant la phase de dictée. Prenez votre temps.</p>
+          <textarea id="student-text" placeholder="Commencez à écrire ici..." rows="12"></textarea>
+        </div>
+
+        <!-- Timer -->
+        <div id="timer-display" class="timer-display" style="display:none;">
+          <span id="timer-icon">⏱️</span>
+          <span id="timer-text">00:00</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== SECTION: CORRECTION ========== -->
+    <section id="section-correction" class="section">
+      <div class="container">
+        <div class="correction-header glass">
+          <h2>📋 Correction guidée</h2>
+          <p id="correction-dictee-title"></p>
+        </div>
+
+        <!-- Tab switcher for correction views -->
+        <div class="correction-tabs">
+          <button class="tab-btn active" data-tab="comparaison" id="tab-comparaison">Comparaison</button>
+          <button class="tab-btn" data-tab="regles" id="tab-regles">Règles de grammaire</button>
+          <button class="tab-btn" data-tab="prononciation" id="tab-prononciation">Prononciation</button>
+        </div>
+
+        <!-- Tab: Comparaison -->
+        <div id="tab-content-comparaison" class="tab-content active">
+          <div class="comparison-panel">
+            <div class="comparison-col">
+              <h3>📝 Votre texte</h3>
+              <div id="student-text-display" class="text-display student-text-box"></div>
+            </div>
+            <div class="comparison-col">
+              <h3>✅ Texte original</h3>
+              <div id="original-text-display" class="text-display original-text-box"></div>
+            </div>
+          </div>
+          <div id="diff-results" class="diff-results glass">
+            <h3>Résultat</h3>
+            <div id="diff-score" class="diff-score"></div>
+            <div id="diff-details" class="diff-details"></div>
+          </div>
+        </div>
+
+        <!-- Tab: Règles -->
+        <div id="tab-content-regles" class="tab-content">
+          <div id="rules-list" class="rules-list"></div>
+        </div>
+
+        <!-- Tab: Prononciation -->
+        <div id="tab-content-prononciation" class="tab-content">
+          <div class="prononciation-intro glass">
+            <p>Cliquez sur n'importe quel mot du texte pour l'entendre prononcé. Les mots difficiles sont mis en évidence.</p>
+          </div>
+          <div id="prononciation-text" class="prononciation-text"></div>
+          <div id="word-info-panel" class="word-info-panel glass" style="display:none;">
+            <h4 id="word-info-title"></h4>
+            <p id="word-info-content"></p>
+            <button id="btn-hear-word" class="btn btn-small btn-primary">🔊 Réécouter</button>
+          </div>
+        </div>
+
+        <!-- Back button -->
+        <div class="correction-actions">
+          <button id="btn-new-dictee" class="btn btn-primary btn-large">
+            <span>🔄</span> Nouvelle dictée
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========== FOOTER ========== -->
+  <footer>
+    <p>Dictée Brevet 2026 — Outil de préparation pour les élèves de 3ème</p>
+  </footer>
+
+  <script src="dictees.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
