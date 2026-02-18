@@ -64,9 +64,9 @@ Ouvrez votre navigateur sur : **[http://localhost:8081](http://localhost:8081)**
 
 ```mermaid
 graph LR
-    A[Navigateur] -- "API /tts" --> B[Node.js Server (Docker)]
-    B -- "host.docker.internal" --> C[Python TTS Server (Native)]
-    C -- "Metal GPU" --> D[Kokoro-82M MLX Model]
+    A["Navigateur"] -- "API /tts" --> B["Node.js Server (Docker)"]
+    B -- "host.docker.internal" --> C["Python TTS Server (Native)"]
+    C -- "Metal GPU" --> D["Kokoro-82M MLX Model"]
     D -- "Audio WAV" --> C
     C -- "Binary" --> B
     B -- "Stream" --> A
