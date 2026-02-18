@@ -19,6 +19,7 @@
         timerStart: null,
         timerInterval: null,
         baseRate: 0.9,
+        dicteeSpeed: 0.85,
         abortController: null,
         // TTS
         ttsMode: 'qwen3tts', // 'qwen3tts' | 'browser'
@@ -92,6 +93,7 @@
         renderDicteeGrid();
         setupVoiceSelector();
         bindEvents();
+        setupSpeedSlider();
         checkBackendHealth();
     }
 
@@ -114,6 +116,28 @@
             state.ttsMode = 'browser';
             updateVoiceSelectorForMode();
         }
+    }
+
+    // -----------------------------------------------
+    // Speed Slider
+    // -----------------------------------------------
+    function setupSpeedSlider() {
+        if (!dom.speedRange) return;
+
+        // Initialize slider with state value
+        dom.speedRange.value = state.dicteeSpeed;
+        if (dom.speedValue) {
+            dom.speedValue.textContent = `${state.dicteeSpeed.toFixed(2)}x`;
+        }
+
+        dom.speedRange.addEventListener('input', () => {
+            const val = parseFloat(dom.speedRange.value);
+            state.dicteeSpeed = val;
+            if (dom.speedValue) {
+                dom.speedValue.textContent = `${val.toFixed(2)}x`;
+            }
+            console.log('[UI] Dictation speed adjusted:', val);
+        });
     }
 
     // -----------------------------------------------
@@ -372,9 +396,9 @@
         for (let i = 0; i < segments.length; i++) {
             try {
                 await fetchTTSAudio(segments[i], 1.0);
-                // Also cache at dictée speed for phrases
+                // Also cache at current dictée speed for phrases
                 if (i >= 3 && i < 3 + phrases.length) {
-                    await fetchTTSAudio(segments[i], 0.85);
+                    await fetchTTSAudio(segments[i], state.dicteeSpeed);
                 }
                 state.pregenProgress = i + 1;
                 dom.phaseDescription.textContent = `Pré-génération audio en cours... ${i + 1}/${segments.length}`;
@@ -602,7 +626,7 @@
             state.currentRepeat = 0;
             dom.repeatIndicator.textContent = '1ère lecture';
             dom.currentWordLabel.textContent = 'Phrase actuelle :';
-            await speakAsync(phrases[i], 0.85);
+            await speakAsync(phrases[i], state.dicteeSpeed);
             await wait(4000);
 
             await waitForResume();
@@ -610,7 +634,7 @@
             // Second read
             state.currentRepeat = 1;
             dom.repeatIndicator.textContent = '2ème lecture';
-            await speakAsync(phrases[i], 0.85);
+            await speakAsync(phrases[i], state.dicteeSpeed);
             await wait(5000);
         }
 

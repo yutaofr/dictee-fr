@@ -34,8 +34,8 @@ const REQUEST_TIMEOUT = 60000; // 60s — local model, first request may be slow
 // -----------------------------------------------
 const audioCache = new Map();
 
-function cacheKey(text) {
-    return createHash('md5').update(text).digest('hex');
+function cacheKey(text, speed) {
+    return createHash('md5').update(`${text}|${speed}`).digest('hex');
 }
 
 function addToCache(key, audioBuffer) {
@@ -49,8 +49,8 @@ function addToCache(key, audioBuffer) {
 // -----------------------------------------------
 // TTS via local mlx-audio server (OpenAI-compatible)
 // -----------------------------------------------
-async function synthesize(text) {
-    const key = cacheKey(text);
+async function synthesize(text, speed = 0.9) {
+    const key = cacheKey(text, speed);
 
     if (audioCache.has(key)) {
         console.log(`[TTS] Cache hit: "${text.substring(0, 40)}..."`);
@@ -70,6 +70,7 @@ async function synthesize(text) {
                 model: TTS_MODEL,
                 input: text,
                 voice: TTS_VOICE,
+                speed: parseFloat(speed)
             }),
             signal: controller.signal,
         });
@@ -111,7 +112,7 @@ app.use(express.static(__dirname, {
 // TTS endpoint
 app.post('/api/tts', async (req, res) => {
     try {
-        const { text } = req.body;
+        const { text, speed } = req.body;
 
         if (!text || typeof text !== 'string') {
             return res.status(400).json({ error: 'Missing or invalid "text" field' });
@@ -121,7 +122,7 @@ app.post('/api/tts', async (req, res) => {
             return res.status(400).json({ error: 'Text too long (max 2000 chars)' });
         }
 
-        const audioBuffer = await synthesize(text);
+        const audioBuffer = await synthesize(text, speed);
 
         res.set({
             'Content-Type': 'audio/wav',
