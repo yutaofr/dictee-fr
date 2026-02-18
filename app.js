@@ -18,7 +18,6 @@
         currentRepeat: 0,
         timerStart: null,
         timerInterval: null,
-        baseRate: 0.9,
         dicteeSpeed: 0.85,
         abortController: null,
         // TTS
@@ -124,7 +123,7 @@
     function setupSpeedSlider() {
         if (!dom.speedRange) return;
 
-        // Initialize slider with state value
+        // Global reading speed applied to all exam reading cycles.
         dom.speedRange.value = state.dicteeSpeed;
         if (dom.speedValue) {
             dom.speedValue.textContent = `${state.dicteeSpeed.toFixed(2)}x`;
@@ -136,7 +135,7 @@
             if (dom.speedValue) {
                 dom.speedValue.textContent = `${val.toFixed(2)}x`;
             }
-            console.log('[UI] Dictation speed adjusted:', val);
+            console.log('[UI] Reading speed adjusted:', val);
         });
     }
 
@@ -236,11 +235,16 @@
         return url;
     }
 
-    function playAudio(blobUrl) {
+    function playAudio(blobUrl, playbackRate = 1.0) {
         return new Promise((resolve, reject) => {
             stopAudio();
 
             const audio = new Audio(blobUrl);
+            const clampedRate = Math.max(0.5, Math.min(2.0, playbackRate));
+            audio.playbackRate = clampedRate;
+            if ('preservesPitch' in audio) audio.preservesPitch = true;
+            if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+
             state.currentAudio = audio;
             state.isSpeaking = true;
 
@@ -291,7 +295,7 @@
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.voice = state.selectedVoice;
             utterance.lang = 'fr-FR';
-            utterance.rate = rate * state.baseRate;
+            utterance.rate = Math.max(0.1, Math.min(2.0, rate));
             utterance.pitch = 1.0;
 
             utterance.onend = () => {
@@ -320,11 +324,13 @@
     // -----------------------------------------------
     // Unified TTS speak function
     // -----------------------------------------------
-    async function speakAsync(text, speed) {
+    async function speakAsync(text, speed = 1.0) {
         if (state.ttsMode === 'qwen3tts') {
             try {
-                const blobUrl = await fetchTTSAudio(text, speed);
-                await playAudio(blobUrl);
+                // Keep model generation at natural speed and adjust playback only.
+                // This slows down dictation while preserving voice character.
+                const blobUrl = await fetchTTSAudio(text, 1.0);
+                await playAudio(blobUrl, speed);
             } catch (e) {
                 if (e.message === 'aborted') throw e;
                 console.warn('[TTS] Qwen3-TTS failed, falling back to browser:', e.message);
@@ -337,8 +343,8 @@
 
     function speakWord(word) {
         if (state.ttsMode === 'qwen3tts') {
-            fetchTTSAudio(word, 0.8)
-                .then(url => playAudio(url))
+            fetchTTSAudio(word, 1.0)
+                .then(url => playAudio(url, 0.8))
                 .catch(e => {
                     // Fallback to browser TTS for single words
                     state.synth.cancel();
@@ -473,10 +479,6 @@
         for (let i = 0; i < segments.length; i++) {
             try {
                 await fetchTTSAudio(segments[i], 1.0);
-                // Also cache dictation segments at current dictée speed.
-                if (i >= 3 && i < 3 + dictationSegments.length) {
-                    await fetchTTSAudio(segments[i], state.dicteeSpeed);
-                }
                 state.pregenProgress = i + 1;
                 dom.phaseDescription.textContent = `Pré-génération audio en cours... ${i + 1}/${segments.length}`;
                 dom.phaseCounter.textContent = `${Math.round((i + 1) / segments.length * 100)}%`;
@@ -674,7 +676,7 @@
         await wait(1500);
 
         await waitForResume();
-        await speakAsync(state.currentDictee.texte, 1.0);
+        await speakAsync(state.currentDictee.texte, state.dicteeSpeed);
         await wait(2000);
     }
 
@@ -732,7 +734,7 @@
         await wait(1500);
 
         await waitForResume();
-        await speakAsync(state.currentDictee.texte, 1.0);
+        await speakAsync(state.currentDictee.texte, state.dicteeSpeed);
         await wait(2000);
     }
 
@@ -957,11 +959,6 @@
         dom.navExamen.addEventListener('click', () => switchSection('examen'));
         dom.navCorrection.addEventListener('click', () => {
             if (state.currentDictee) switchSection('correction');
-        });
-
-        dom.speedRange.addEventListener('input', () => {
-            state.baseRate = parseFloat(dom.speedRange.value);
-            dom.speedValue.textContent = state.baseRate.toFixed(2) + '×';
         });
 
         dom.btnStart.addEventListener('click', startExam);
