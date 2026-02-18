@@ -370,20 +370,97 @@
             .filter(s => s.length > 0);
     }
 
+    const PUNCTUATION_RULES = {
+        ',': { speak: 'virgule', pauseMs: 1100 },
+        ';': { speak: 'point-virgule', pauseMs: 1400 },
+        ':': { speak: 'deux-points', pauseMs: 1400 },
+        '.': { speak: 'point', pauseMs: 1800 },
+        '?': { speak: "point d'interrogation", pauseMs: 1800 },
+        '!': { speak: "point d'exclamation", pauseMs: 1800 },
+        '…': { speak: 'points de suspension', pauseMs: 2000 },
+    };
+
+    function normalizePunctuationToken(token) {
+        return token === '...' ? '…' : token;
+    }
+
+    function splitSentenceByPunctuation(sentence) {
+        const segments = [];
+        const punctuationRegex = /(\.{3}|…|[,;:!?.])/g;
+
+        let lastIndex = 0;
+        let match;
+        while ((match = punctuationRegex.exec(sentence)) !== null) {
+            const textChunk = sentence.slice(lastIndex, match.index).trim();
+            if (textChunk) {
+                segments.push({ type: 'text', value: textChunk });
+            }
+
+            const punct = normalizePunctuationToken(match[0]);
+            if (PUNCTUATION_RULES[punct]) {
+                segments.push({ type: 'punctuation', value: punct });
+            }
+
+            lastIndex = punctuationRegex.lastIndex;
+        }
+
+        const trailingText = sentence.slice(lastIndex).trim();
+        if (trailingText) {
+            segments.push({ type: 'text', value: trailingText });
+        }
+
+        return segments;
+    }
+
+    function getDictationSpeechSegments(texte) {
+        const phrases = splitIntoSentences(texte);
+        const dictationSegments = [];
+
+        phrases.forEach(phrase => {
+            const pieces = splitSentenceByPunctuation(phrase);
+            pieces.forEach(piece => {
+                if (piece.type === 'text') {
+                    dictationSegments.push(piece.value);
+                } else {
+                    dictationSegments.push(PUNCTUATION_RULES[piece.value].speak);
+                }
+            });
+        });
+
+        return { phrases, dictationSegments };
+    }
+
+    async function speakSentenceWithPunctuation(sentence, speed) {
+        const segments = splitSentenceByPunctuation(sentence);
+
+        for (const segment of segments) {
+            await waitForResume();
+
+            if (segment.type === 'text') {
+                await speakAsync(segment.value, speed);
+                continue;
+            }
+
+            const punctRule = PUNCTUATION_RULES[segment.value];
+            await speakAsync(punctRule.speak, speed);
+            await wait(punctRule.pauseMs);
+        }
+    }
+
     // -----------------------------------------------
     // Audio Pre-generation
     // -----------------------------------------------
     async function pregenerate(dictee) {
         if (state.ttsMode !== 'qwen3tts') return;
 
-        const phrases = splitIntoSentences(dictee.texte);
+        const { dictationSegments } = getDictationSpeechSegments(dictee.texte);
 
         const segments = [
             // Phase announcements
             "Phase un. Lecture intégrale. Écoutez attentivement sans écrire.",
             dictee.texte,
-            "Phase deux. Dictée. Écrivez le texte qui va vous être dicté. Chaque phrase sera lue deux fois.",
-            ...phrases,
+            "Phase deux. Dictée. Écrivez le texte qui va vous être dicté. Chaque phrase sera lue deux fois en marquant et en annonçant la ponctuation.",
+            ...dictationSegments,
             "Phase trois. Relecture. Écoutez une dernière fois et corrigez votre copie.",
         ];
 
@@ -396,8 +473,8 @@
         for (let i = 0; i < segments.length; i++) {
             try {
                 await fetchTTSAudio(segments[i], 1.0);
-                // Also cache at current dictée speed for phrases
-                if (i >= 3 && i < 3 + phrases.length) {
+                // Also cache dictation segments at current dictée speed.
+                if (i >= 3 && i < 3 + dictationSegments.length) {
                     await fetchTTSAudio(segments[i], state.dicteeSpeed);
                 }
                 state.pregenProgress = i + 1;
@@ -534,7 +611,7 @@
             dictee: {
                 icon: '✍️',
                 title: 'Phase 2 — Dictée',
-                desc: 'Écrivez le texte dicté. Chaque phrase est lue deux fois.',
+                desc: 'Écrivez le texte dicté. Chaque phrase est lue deux fois avec ponctuation annoncée.',
                 dots: [true, true, false]
             },
             relecture: {
@@ -609,7 +686,7 @@
         dom.currentWordDisplay.style.display = '';
         dom.currentWordDisplay.classList.add('active');
 
-        await speakAsync("Phase deux. Dictée. Écrivez le texte qui va vous être dicté. Chaque phrase sera lue deux fois.", 1.0);
+        await speakAsync("Phase deux. Dictée. Écrivez le texte qui va vous être dicté. Chaque phrase sera lue deux fois en marquant et en annonçant la ponctuation.", 1.0);
         await wait(2000);
 
         // Official Brevet protocol: dictée "phrase par phrase"
@@ -626,16 +703,16 @@
             state.currentRepeat = 0;
             dom.repeatIndicator.textContent = '1ère lecture';
             dom.currentWordLabel.textContent = 'Phrase actuelle :';
-            await speakAsync(phrases[i], state.dicteeSpeed);
-            await wait(4000);
+            await speakSentenceWithPunctuation(phrases[i], state.dicteeSpeed);
+            await wait(2500);
 
             await waitForResume();
 
             // Second read
             state.currentRepeat = 1;
             dom.repeatIndicator.textContent = '2ème lecture';
-            await speakAsync(phrases[i], state.dicteeSpeed);
-            await wait(5000);
+            await speakSentenceWithPunctuation(phrases[i], state.dicteeSpeed);
+            await wait(3500);
         }
 
         dom.currentWordDisplay.classList.remove('active');
