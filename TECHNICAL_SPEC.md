@@ -101,3 +101,33 @@ The logic in `app.js` is strictly aligned with the official French "Diplôme Nat
 - `/tts_server.sh`: Setup and launch script for the local AI environment.
 - `/docker-compose.yml`: Container orchestration (web app only).
 - `/Dockerfile`: Alpine-based Node.js production image.
+
+---
+
+## 🤖 Agent Context & System Invariants
+
+To ensure efficient future interactions with LLMs and Coding Agents, follow these **System Invariants**:
+
+### 1. Protocol Strictness
+The application's primary value is its alignment with the **Official Brevet 2026 Protocol**.
+- **Rule**: Do not modify the 3-phase structure (Lecture → Dictée → Relecture).
+- **Rule**: Phase 2 must always read "phrase par phrase" (sentence by sentence), splitting at `.!?`.
+- **Logic Location**: `runDictee()` in `app.js`.
+
+### 2. Hardware Constraint (Metal)
+- **Invariant**: The MLX model **must** run on the host Mac OS, not inside Docker.
+- **Why**: Docker on macOS cannot access Apple Silicon's Metal GPU (MPS).
+- **Communication**: Docker reaches the host via `host.docker.internal:8000`.
+
+### 3. Voice Consistency
+- **Preferred Model**: `Kokoro-82M-bf16`.
+- **Reason**: Superior speed/quality ratio for French education.
+- **Constraint**: If changed, parity must be maintained between `tts_server.py` (Python) and `server.js` (Node.js/Proxy).
+
+### 4. Language Code
+- **French Protocol**: Always use `lang_code: "f"` for Kokoro and `language: "French"` for Qwen to ensure proper phoneme generation.
+
+### 5. Deployment Rule
+- Run TTS server natively: `./tts_server.sh`.
+- Run Web app via Docker: `docker-compose up`.
+
