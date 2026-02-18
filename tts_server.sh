@@ -1,11 +1,11 @@
 #!/bin/bash
 # =====================================================
-# Local Qwen3-TTS Server — Mac M4 Pro (MLX)
+# Local Kokoro TTS Server — Mac Apple Silicon (MLX)
 # =====================================================
 # Runs a custom FastAPI TTS server on port 8000.
 # The Node.js web server (Docker) calls this via host.docker.internal:8000.
 #
-# First run: downloads ~1.2GB model from Hugging Face.
+# First run: downloads model files from Hugging Face cache.
 # Subsequent runs: model is cached in ~/.cache/huggingface/
 #
 # Usage:
@@ -25,10 +25,9 @@ for pkg in mlx-audio fastapi uvicorn; do
     fi
 done
 
-echo "[TTS] Starting Qwen3-TTS server on port 8000..."
-echo "[TTS] First run downloads ~1.2GB model — please wait."
+echo "[TTS] Starting Kokoro TTS server on port 8000..."
+echo "[TTS] First run downloads model files — please wait."
 echo "[TTS] Web app: http://localhost:8081"
 echo ""
 
 python3 "$SCRIPT_DIR/tts_server.py"
-

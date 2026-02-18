@@ -6,6 +6,8 @@ Only 82M params → blazing fast on M4 Pro.
 """
 
 import io
+import re
+import threading
 import wave
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -20,6 +22,8 @@ MODEL_NAME = "mlx-community/Kokoro-82M-bf16"
 DEFAULT_VOICE = "ff_siwis"      # French female voice
 DEFAULT_LANG = "f"              # French lang code
 DEFAULT_SPEED = 0.9             # Slightly slower for dictation clarity
+MAX_CHUNK_CHARS = 220           # Keep phonemizer input short for stable French output
+CHUNK_GAP_SECONDS = 0.10        # Tiny pause between chunks for natural flow
 
 # -----------------------------------------------
 # Load model at startup
@@ -28,6 +32,7 @@ print(f"[TTS] Loading model: {MODEL_NAME}")
 
 from mlx_audio.tts.utils import load_model
 model = load_model(MODEL_NAME)
+model_lock = threading.Lock()
 
 print("[TTS] Model loaded! Server ready.")
 
@@ -68,6 +73,80 @@ def audio_to_wav_bytes(audio_array, sample_rate: int = 24000) -> bytes:
     return buf.getvalue()
 
 
+def to_numpy_audio(audio_array) -> np.ndarray:
+    if hasattr(audio_array, 'tolist'):
+        arr = np.array(audio_array.tolist(), dtype=np.float32)
+    else:
+        arr = np.asarray(audio_array, dtype=np.float32)
+
+    if arr.ndim > 1:
+        arr = arr.mean(axis=-1)
+
+    return arr.astype(np.float32, copy=False)
+
+
+def hard_wrap_segment(segment: str, max_chars: int) -> list[str]:
+    words = segment.split()
+    if not words:
+        return []
+
+    chunks = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            chunks.append(current)
+            current = word
+    chunks.append(current)
+    return chunks
+
+
+def split_text_for_tts(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if not cleaned:
+        return []
+    if len(cleaned) <= max_chars:
+        return [cleaned]
+
+    sentence_like = re.split(r"(?<=[.!?;:])\s+", cleaned)
+    units: list[str] = []
+    for piece in sentence_like:
+        part = piece.strip()
+        if not part:
+            continue
+        if len(part) <= max_chars:
+            units.append(part)
+            continue
+
+        comma_parts = re.split(r"(?<=,)\s+", part)
+        for cp in comma_parts:
+            c = cp.strip()
+            if not c:
+                continue
+            if len(c) <= max_chars:
+                units.append(c)
+            else:
+                units.extend(hard_wrap_segment(c, max_chars))
+
+    if not units:
+        return [cleaned]
+
+    packed: list[str] = []
+    current = units[0]
+    for unit in units[1:]:
+        candidate = f"{current} {unit}"
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            packed.append(current)
+            current = unit
+    packed.append(current)
+
+    return packed
+
+
 @app.get("/v1/models")
 def list_models():
     return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model"}]}
@@ -80,20 +159,48 @@ def synthesize(req: SpeechRequest):
 
     try:
         text = req.input.strip()
-        print(f'[TTS] Synthesizing ({len(text)} chars): "{text[:60]}..."')
+        chunks = split_text_for_tts(text)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="input is required")
 
-        results = list(model.generate(
-            text=text,
-            voice=req.voice,
-            speed=req.speed,
-            lang_code=req.lang_code,
-        ))
+        print(f'[TTS] Synthesizing ({len(text)} chars, {len(chunks)} chunk(s)): "{text[:60]}..."')
 
-        if not results:
+        chunk_audios: list[np.ndarray] = []
+        sample_rate = 24000
+
+        # mlx/kokoro is not safe for concurrent Metal command encoding.
+        # Serialize all generation calls inside this process.
+        with model_lock:
+            for idx, chunk in enumerate(chunks):
+                if len(chunks) > 1:
+                    print(f'[TTS]   chunk {idx + 1}/{len(chunks)} ({len(chunk)} chars)')
+
+                results = list(model.generate(
+                    text=chunk,
+                    voice=req.voice,
+                    speed=req.speed,
+                    lang_code=req.lang_code,
+                ))
+
+                if not results:
+                    raise HTTPException(status_code=500, detail="No audio generated")
+
+                sample_rate = getattr(results[0], 'sample_rate', sample_rate)
+                chunk_audios.append(to_numpy_audio(results[0].audio))
+
+        if not chunk_audios:
             raise HTTPException(status_code=500, detail="No audio generated")
 
-        audio = results[0].audio
-        sample_rate = getattr(results[0], 'sample_rate', 24000)
+        if len(chunk_audios) > 1:
+            gap = np.zeros(int(sample_rate * CHUNK_GAP_SECONDS), dtype=np.float32)
+            timeline = []
+            for i, arr in enumerate(chunk_audios):
+                timeline.append(arr)
+                if i < len(chunk_audios) - 1:
+                    timeline.append(gap)
+            audio = np.concatenate(timeline)
+        else:
+            audio = chunk_audios[0]
 
         wav_bytes = audio_to_wav_bytes(audio, sample_rate)
         print(f"[TTS] Generated {len(wav_bytes)} bytes")

@@ -1,6 +1,6 @@
 // =====================================================
 // Dictée Brevet 2026 — Backend TTS Server
-// Proxy vers Qwen3-TTS local (mlx-audio, OpenAI-compatible API)
+// Proxy vers Kokoro local (mlx-audio, OpenAI-compatible API)
 // =====================================================
 
 import express from 'express';
@@ -33,6 +33,7 @@ const REQUEST_TIMEOUT = 60000; // 60s — local model, first request may be slow
 // Cache
 // -----------------------------------------------
 const audioCache = new Map();
+const inFlight = new Map();
 
 function cacheKey(text, speed) {
     return createHash('md5').update(`${text}|${speed}`).digest('hex');
@@ -57,42 +58,54 @@ async function synthesize(text, speed = 0.9) {
         return audioCache.get(key);
     }
 
-    console.log(`[TTS] Synthesizing: "${text.substring(0, 60)}..."`);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
-
-    try {
-        const response = await fetch(TTS_ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                model: TTS_MODEL,
-                input: text,
-                voice: TTS_VOICE,
-                speed: parseFloat(speed)
-            }),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`mlx-audio error ${response.status}: ${errText}`);
-        }
-
-        const audioBuffer = Buffer.from(await response.arrayBuffer());
-        console.log(`[TTS] Generated ${audioBuffer.length} bytes`);
-
-        addToCache(key, audioBuffer);
-        return audioBuffer;
-
-    } catch (e) {
-        clearTimeout(timeout);
-        if (e.name === 'AbortError') throw new Error('TTS timeout');
-        throw e;
+    if (inFlight.has(key)) {
+        console.log(`[TTS] Awaiting in-flight synthesis: "${text.substring(0, 40)}..."`);
+        return inFlight.get(key);
     }
+
+    const requestPromise = (async () => {
+        console.log(`[TTS] Synthesizing: "${text.substring(0, 60)}..."`);
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+        try {
+            const response = await fetch(TTS_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: TTS_MODEL,
+                    input: text,
+                    voice: TTS_VOICE,
+                    speed: parseFloat(speed)
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeout);
+
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`mlx-audio error ${response.status}: ${errText}`);
+            }
+
+            const audioBuffer = Buffer.from(await response.arrayBuffer());
+            console.log(`[TTS] Generated ${audioBuffer.length} bytes`);
+
+            addToCache(key, audioBuffer);
+            return audioBuffer;
+
+        } catch (e) {
+            clearTimeout(timeout);
+            if (e.name === 'AbortError') throw new Error('TTS timeout');
+            throw e;
+        } finally {
+            inFlight.delete(key);
+        }
+    })();
+
+    inFlight.set(key, requestPromise);
+    return requestPromise;
 }
 
 // -----------------------------------------------

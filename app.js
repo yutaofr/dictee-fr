@@ -1,6 +1,6 @@
 // =====================================================
 // Dictée Brevet 2026 — Application principale
-// TTS via Qwen3-TTS (Hugging Face) avec fallback Web Speech API
+// TTS via Kokoro local (MLX), sans fallback navigateur
 // =====================================================
 
 (function () {
@@ -21,14 +21,15 @@
         dicteeSpeed: 0.85,
         abortController: null,
         // TTS
-        ttsMode: 'qwen3tts', // 'qwen3tts' | 'browser'
+        ttsAvailable: false,
         currentAudio: null,  // current Audio object
+        currentAudioResolve: null,
         audioCache: new Map(), // text → blob URL cache
         pregenProgress: 0,
         pregenTotal: 0,
-        // Browser TTS fallback
-        synth: window.speechSynthesis,
-        selectedVoice: null,
+        pregenInProgress: false,
+        pregenSkipRequested: false,
+        skipLectureIntroRequested: false,
     };
 
     // -----------------------------------------------
@@ -57,6 +58,8 @@
         speedRange: $('speed-range'),
         speedValue: $('speed-value'),
         btnStart: $('btn-start'),
+        btnSkipLectureIntro: $('btn-skip-lecture-intro'),
+        btnSkipPregen: $('btn-skip-pregen'),
         btnPause: $('btn-pause'),
         btnResume: $('btn-resume'),
         btnSkipPhase: $('btn-skip-phase'),
@@ -104,16 +107,19 @@
             const res = await fetch('/api/health');
             if (res.ok) {
                 const data = await res.json();
-                console.log('[TTS] Backend Qwen3-TTS disponible:', data);
-                state.ttsMode = 'qwen3tts';
-                updateVoiceSelectorForMode();
+                if (!data.ttsReachable) {
+                    throw new Error('Kokoro server unreachable');
+                }
+                console.log('[TTS] Backend Kokoro disponible:', data);
+                state.ttsAvailable = true;
+                dom.voiceSelect.disabled = false;
             } else {
                 throw new Error('Backend not ok');
             }
         } catch (e) {
-            console.warn('[TTS] Backend Qwen3-TTS indisponible, fallback sur Web Speech API');
-            state.ttsMode = 'browser';
-            updateVoiceSelectorForMode();
+            state.ttsAvailable = false;
+            dom.voiceSelect.disabled = true;
+            console.error('[TTS] Backend Kokoro indisponible:', e.message);
         }
     }
 
@@ -143,73 +149,17 @@
     // Voice Selector
     // -----------------------------------------------
     function setupVoiceSelector() {
-        // Add Qwen3-TTS local option first
-        const qwenOpt = document.createElement('option');
-        qwenOpt.value = 'qwen3tts';
-        qwenOpt.textContent = '🎙️ Kokoro TTS (Local MLX) — Naturelle & Expressive';
-        qwenOpt.selected = true;
-        dom.voiceSelect.appendChild(qwenOpt);
-
-        // Separator
-        const sep = document.createElement('option');
-        sep.disabled = true;
-        sep.textContent = '── Voix système (fallback) ──';
-        dom.voiceSelect.appendChild(sep);
-
-        // Load browser voices
-        loadBrowserVoices();
-        if (state.synth.onvoiceschanged !== undefined) {
-            state.synth.onvoiceschanged = loadBrowserVoices;
-        }
-
-        dom.voiceSelect.addEventListener('change', () => {
-            const val = dom.voiceSelect.value;
-            if (val === 'qwen3tts') {
-                state.ttsMode = 'qwen3tts';
-            } else {
-                state.ttsMode = 'browser';
-                const voices = state.synth.getVoices().filter(v => v.lang.startsWith('fr'));
-                state.selectedVoice = voices[parseInt(val)] || voices[0];
-            }
-            console.log('[TTS] Mode:', state.ttsMode);
-        });
-    }
-
-    function loadBrowserVoices() {
-        const voices = state.synth.getVoices();
-        const frenchVoices = voices.filter(v => v.lang.startsWith('fr'));
-
-        // Remove old browser voice options (keep melotts and separator)
-        while (dom.voiceSelect.children.length > 2) {
-            dom.voiceSelect.removeChild(dom.voiceSelect.lastChild);
-        }
-
-        frenchVoices.sort((a, b) => {
-            if (a.localService && !b.localService) return -1;
-            if (!a.localService && b.localService) return 1;
-            return a.name.localeCompare(b.name);
-        });
-
-        frenchVoices.forEach((voice, i) => {
-            const opt = document.createElement('option');
-            opt.value = i;
-            opt.textContent = `${voice.name} (${voice.lang})${voice.localService ? ' ★' : ''}`;
-            dom.voiceSelect.appendChild(opt);
-        });
-
-        if (frenchVoices.length > 0) {
-            state.selectedVoice = frenchVoices[0];
-        }
-    }
-
-    function updateVoiceSelectorForMode() {
-        if (state.ttsMode === 'qwen3tts') {
-            dom.voiceSelect.value = 'qwen3tts';
-        }
+        dom.voiceSelect.innerHTML = '';
+        const kokoroOpt = document.createElement('option');
+        kokoroOpt.value = 'kokoro_ff_siwis';
+        kokoroOpt.textContent = '🎙️ Kokoro MLX — ff_siwis (Français)';
+        kokoroOpt.selected = true;
+        dom.voiceSelect.appendChild(kokoroOpt);
+        dom.voiceSelect.disabled = true;
     }
 
     // -----------------------------------------------
-    // TTS Engine — Qwen3-TTS (via backend)
+    // TTS Engine — Kokoro (via backend)
     // -----------------------------------------------
     async function fetchTTSAudio(text, speed = 1.0) {
         // Check cache
@@ -235,38 +185,40 @@
         return url;
     }
 
-    function playAudio(blobUrl, playbackRate = 1.0) {
+    function playAudio(blobUrl) {
         return new Promise((resolve, reject) => {
             stopAudio();
 
             const audio = new Audio(blobUrl);
-            const clampedRate = Math.max(0.5, Math.min(2.0, playbackRate));
-            audio.playbackRate = clampedRate;
-            if ('preservesPitch' in audio) audio.preservesPitch = true;
-            if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
-
             state.currentAudio = audio;
+            state.currentAudioResolve = resolve;
             state.isSpeaking = true;
 
             audio.onended = () => {
+                if (state.currentAudio !== audio) return;
                 state.isSpeaking = false;
                 state.currentAudio = null;
+                state.currentAudioResolve = null;
                 resolve();
             };
 
             audio.onerror = (e) => {
+                if (state.currentAudio !== audio) return;
                 state.isSpeaking = false;
                 state.currentAudio = null;
+                state.currentAudioResolve = null;
                 reject(new Error('Audio playback failed'));
             };
 
             // Handle abort
             if (state.abortController) {
                 state.abortController.signal.addEventListener('abort', () => {
+                    if (state.currentAudio !== audio) return;
                     audio.pause();
                     audio.currentTime = 0;
                     state.isSpeaking = false;
                     state.currentAudio = null;
+                    state.currentAudioResolve = null;
                     reject(new Error('aborted'));
                 });
             }
@@ -276,92 +228,37 @@
     }
 
     function stopAudio() {
+        const resolveCurrent = state.currentAudioResolve;
         if (state.currentAudio) {
             state.currentAudio.pause();
             state.currentAudio.currentTime = 0;
             state.currentAudio = null;
         }
+        state.currentAudioResolve = null;
         state.isSpeaking = false;
-        // Also stop browser TTS if active
-        state.synth.cancel();
-    }
-
-    // -----------------------------------------------
-    // TTS Engine — Browser fallback
-    // -----------------------------------------------
-    function speakBrowser(text, rate) {
-        return new Promise((resolve, reject) => {
-            state.synth.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.voice = state.selectedVoice;
-            utterance.lang = 'fr-FR';
-            utterance.rate = Math.max(0.1, Math.min(2.0, rate));
-            utterance.pitch = 1.0;
-
-            utterance.onend = () => {
-                state.isSpeaking = false;
-                resolve();
-            };
-
-            utterance.onerror = (e) => {
-                state.isSpeaking = false;
-                if (e.error === 'canceled') reject(new Error('aborted'));
-                else resolve();
-            };
-
-            if (state.abortController) {
-                state.abortController.signal.addEventListener('abort', () => {
-                    state.synth.cancel();
-                    reject(new Error('aborted'));
-                });
-            }
-
-            state.isSpeaking = true;
-            state.synth.speak(utterance);
-        });
+        if (resolveCurrent) {
+            resolveCurrent();
+        }
     }
 
     // -----------------------------------------------
     // Unified TTS speak function
     // -----------------------------------------------
     async function speakAsync(text, speed = 1.0) {
-        if (state.ttsMode === 'qwen3tts') {
-            try {
-                // Keep model generation at natural speed and adjust playback only.
-                // This slows down dictation while preserving voice character.
-                const blobUrl = await fetchTTSAudio(text, 1.0);
-                await playAudio(blobUrl, speed);
-            } catch (e) {
-                if (e.message === 'aborted') throw e;
-                console.warn('[TTS] Qwen3-TTS failed, falling back to browser:', e.message);
-                await speakBrowser(text, speed);
-            }
-        } else {
-            await speakBrowser(text, speed);
+        if (!state.ttsAvailable) {
+            throw new Error('Kokoro server unavailable');
         }
+        const blobUrl = await fetchTTSAudio(text, speed);
+        await playAudio(blobUrl);
     }
 
     function speakWord(word) {
-        if (state.ttsMode === 'qwen3tts') {
-            fetchTTSAudio(word, 1.0)
-                .then(url => playAudio(url, 0.8))
-                .catch(e => {
-                    // Fallback to browser TTS for single words
-                    state.synth.cancel();
-                    const utterance = new SpeechSynthesisUtterance(word);
-                    utterance.voice = state.selectedVoice;
-                    utterance.lang = 'fr-FR';
-                    utterance.rate = 0.75;
-                    state.synth.speak(utterance);
-                });
-        } else {
-            state.synth.cancel();
-            const utterance = new SpeechSynthesisUtterance(word);
-            utterance.voice = state.selectedVoice;
-            utterance.lang = 'fr-FR';
-            utterance.rate = 0.75;
-            state.synth.speak(utterance);
-        }
+        if (!state.ttsAvailable) return;
+        fetchTTSAudio(word, 0.8)
+            .then(url => playAudio(url))
+            .catch(e => {
+                console.warn('[TTS] Word synthesis failed:', e.message);
+            });
     }
 
     // -----------------------------------------------
@@ -374,6 +271,50 @@
             .split(/(?<=[.!?])\s+/)
             .map(s => s.trim())
             .filter(s => s.length > 0);
+    }
+
+    const OFFICIAL_DICTEE_SIGNS_GENERAL = 600;
+
+    function countSignsWithoutSpaces(text) {
+        return text.replace(/\s+/g, '').length;
+    }
+
+    function buildDicteeKeyPointsText(dictee) {
+        const ruleTypeLabels = {
+            accord: 'les accords',
+            conjugaison: 'la conjugaison',
+            homophones: 'les homophones',
+            vocabulaire: 'le vocabulaire',
+        };
+
+        const types = [...new Set((dictee.regles || []).map(rule => rule.type))]
+            .map(type => ruleTypeLabels[type] || type)
+            .slice(0, 2);
+
+        const focusWords = (dictee.regles || [])
+            .slice(0, 2)
+            .map(rule => (rule.mot || '').replace(/[«»"]/g, '').trim())
+            .filter(Boolean);
+
+        const parts = [];
+        if (types.length > 0) {
+            parts.push(`Points clés : ${types.join(' et ')}`);
+        }
+        if (focusWords.length > 0) {
+            parts.push(`mots à surveiller : ${focusWords.join(', ')}`);
+        }
+        return parts.length > 0 ? `${parts.join('. ')}.` : '';
+    }
+
+    function buildPhaseAnnouncements(dictee) {
+        const signCount = countSignsWithoutSpaces(dictee.texte);
+        const keyPointsText = buildDicteeKeyPointsText(dictee);
+
+        return {
+            lecture1: `Phase un. Lecture intégrale. Écoutez le texte sans écrire. Le texte s'intitule ${dictee.titre}, de ${dictee.auteur}, environ ${signCount} signes sans les espaces. ${keyPointsText}`,
+            dictee: "Phase deux. Dictée. Chaque phrase sera lue deux fois, en marquant et en annonçant la ponctuation. Écrivez pendant la dictée, puis relisez chaque phrase.",
+            relecture: "Phase trois. Relecture. Le texte est relu une dernière fois, de façon continue, sans annoncer la ponctuation, pour vérifier et corriger votre copie.",
+        };
     }
 
     const PUNCTUATION_RULES = {
@@ -457,17 +398,21 @@
     // Audio Pre-generation
     // -----------------------------------------------
     async function pregenerate(dictee) {
-        if (state.ttsMode !== 'qwen3tts') return;
+        if (!state.ttsAvailable) return;
 
+        state.pregenInProgress = true;
+        state.pregenSkipRequested = false;
+
+        const announcements = buildPhaseAnnouncements(dictee);
         const { dictationSegments } = getDictationSpeechSegments(dictee.texte);
 
         const segments = [
             // Phase announcements
-            "Phase un. Lecture intégrale. Écoutez attentivement sans écrire.",
+            announcements.lecture1,
             dictee.texte,
-            "Phase deux. Dictée. Écrivez le texte qui va vous être dicté. Chaque phrase sera lue deux fois en marquant et en annonçant la ponctuation.",
+            announcements.dictee,
             ...dictationSegments,
-            "Phase trois. Relecture. Écoutez une dernière fois et corrigez votre copie.",
+            announcements.relecture,
         ];
 
         state.pregenTotal = segments.length;
@@ -477,6 +422,13 @@
         dom.phaseDescription.textContent = `Pré-génération audio en cours... 0/${segments.length}`;
 
         for (let i = 0; i < segments.length; i++) {
+            if (state.pregenSkipRequested) {
+                console.log('[TTS] Pre-generation skipped by user');
+                dom.phaseDescription.textContent = 'Pré-génération interrompue. Vous pouvez commencer sans attendre.';
+                dom.phaseCounter.textContent = '⏭️';
+                break;
+            }
+
             try {
                 await fetchTTSAudio(segments[i], 1.0);
                 state.pregenProgress = i + 1;
@@ -487,9 +439,13 @@
             }
         }
 
-        console.log('[TTS] Pre-generation complete');
-        dom.phaseDescription.textContent = 'Audio prêt ! Cliquez sur « Commencer » pour démarrer.';
-        dom.phaseCounter.textContent = '✅';
+        if (!state.pregenSkipRequested) {
+            console.log('[TTS] Pre-generation complete');
+            dom.phaseDescription.textContent = 'Audio prêt ! Cliquez sur « Commencer » pour démarrer.';
+            dom.phaseCounter.textContent = '✅';
+        }
+
+        state.pregenInProgress = false;
     }
 
     // -----------------------------------------------
@@ -578,10 +534,15 @@
 
         // Reset UI
         dom.btnStart.style.display = '';
+        dom.btnSkipLectureIntro.style.display = 'none';
+        dom.btnSkipPregen.style.display = '';
+        dom.btnSkipPregen.disabled = false;
         dom.btnPause.style.display = 'none';
         dom.btnResume.style.display = 'none';
         dom.btnSkipPhase.style.display = 'none';
         dom.btnFinish.style.display = 'none';
+        dom.btnStart.disabled = true;
+        state.skipLectureIntroRequested = false;
         dom.writingArea.style.display = 'none';
         dom.currentWordDisplay.style.display = 'none';
         dom.timerDisplay.style.display = 'none';
@@ -590,7 +551,13 @@
         updatePhaseUI('idle');
 
         // Pre-generate audio segments
-        await pregenerate(dictee);
+        try {
+            await pregenerate(dictee);
+        } finally {
+            dom.btnStart.disabled = !state.ttsAvailable;
+            dom.btnSkipLectureIntro.style.display = 'none';
+            dom.btnSkipPregen.style.display = 'none';
+        }
     }
 
     // -----------------------------------------------
@@ -645,6 +612,15 @@
     // Exam Flow
     // -----------------------------------------------
     async function startExam() {
+        if (!state.ttsAvailable) {
+            dom.phaseDescription.textContent = 'Serveur Kokoro indisponible. Lancez ./tts_server.sh puis rechargez la page.';
+            return;
+        }
+
+        state.pregenSkipRequested = true;
+        dom.btnSkipLectureIntro.style.display = 'none';
+        dom.btnSkipPregen.style.display = 'none';
+
         state.abortController = new AbortController();
 
         dom.btnStart.style.display = 'none';
@@ -672,8 +648,19 @@
         dom.currentWordDisplay.style.display = 'none';
         dom.writingArea.style.display = 'none';
 
-        await speakAsync("Phase un. Lecture intégrale. Écoutez attentivement sans écrire.", 1.0);
-        await wait(1500);
+        const announcements = buildPhaseAnnouncements(state.currentDictee);
+        state.skipLectureIntroRequested = false;
+        dom.btnSkipLectureIntro.style.display = '';
+        dom.btnSkipLectureIntro.disabled = false;
+
+        try {
+            await speakAsync(announcements.lecture1, 1.0);
+            if (!state.skipLectureIntroRequested) {
+                await wait(1500);
+            }
+        } finally {
+            dom.btnSkipLectureIntro.style.display = 'none';
+        }
 
         await waitForResume();
         await speakAsync(state.currentDictee.texte, state.dicteeSpeed);
@@ -688,7 +675,8 @@
         dom.currentWordDisplay.style.display = '';
         dom.currentWordDisplay.classList.add('active');
 
-        await speakAsync("Phase deux. Dictée. Écrivez le texte qui va vous être dicté. Chaque phrase sera lue deux fois en marquant et en annonçant la ponctuation.", 1.0);
+        const announcements = buildPhaseAnnouncements(state.currentDictee);
+        await speakAsync(announcements.dictee, 1.0);
         await wait(2000);
 
         // Official Brevet protocol: dictée "phrase par phrase"
@@ -730,7 +718,8 @@
         updatePhaseUI('relecture');
         dom.currentWordDisplay.style.display = 'none';
 
-        await speakAsync("Phase trois. Relecture. Écoutez une dernière fois et corrigez votre copie.", 1.0);
+        const announcements = buildPhaseAnnouncements(state.currentDictee);
+        await speakAsync(announcements.relecture, 1.0);
         await wait(1500);
 
         await waitForResume();
@@ -963,12 +952,28 @@
 
         dom.btnStart.addEventListener('click', startExam);
 
+        dom.btnSkipLectureIntro.addEventListener('click', () => {
+            if (state.phase !== 'lecture1') return;
+            state.skipLectureIntroRequested = true;
+            dom.btnSkipLectureIntro.disabled = true;
+            dom.phaseDescription.textContent = 'Introduction passée. Début de la lecture du texte...';
+            stopAudio();
+        });
+
+        dom.btnSkipPregen.addEventListener('click', () => {
+            if (!state.pregenInProgress) return;
+            state.pregenSkipRequested = true;
+            dom.btnSkipPregen.disabled = true;
+            dom.btnStart.disabled = !state.ttsAvailable;
+            dom.phaseDescription.textContent = 'Arrêt de la pré-génération en cours...';
+            dom.phaseCounter.textContent = '⏭️';
+        });
+
         dom.btnPause.addEventListener('click', () => {
             state.isPaused = true;
             if (state.currentAudio) {
                 state.currentAudio.pause();
             }
-            state.synth.pause();
             dom.btnPause.style.display = 'none';
             dom.btnResume.style.display = '';
         });
@@ -978,7 +983,6 @@
             if (state.currentAudio) {
                 state.currentAudio.play();
             }
-            state.synth.resume();
             dom.btnResume.style.display = 'none';
             dom.btnPause.style.display = '';
         });
@@ -998,6 +1002,10 @@
         dom.btnNewDictee.addEventListener('click', () => {
             stopAudio();
             clearInterval(state.timerInterval);
+            state.pregenSkipRequested = true;
+            state.pregenInProgress = false;
+            state.skipLectureIntroRequested = false;
+            dom.btnSkipLectureIntro.style.display = 'none';
             // Clear audio cache
             state.audioCache.forEach(url => URL.revokeObjectURL(url));
             state.audioCache.clear();
