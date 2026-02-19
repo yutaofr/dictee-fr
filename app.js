@@ -24,12 +24,16 @@
         ttsAvailable: false,
         currentAudio: null,  // current Audio object
         currentAudioResolve: null,
+        currentAudioReject: null,
         audioCache: new Map(), // text → blob URL cache
         pregenProgress: 0,
         pregenTotal: 0,
         pregenInProgress: false,
         pregenSkipRequested: false,
         skipLectureIntroRequested: false,
+        skipTransitionInProgress: false,
+        examInProgress: false,
+        activeRunToken: 0,
     };
 
     // -----------------------------------------------
@@ -185,13 +189,18 @@
         return url;
     }
 
-    function playAudio(blobUrl) {
+    function playAudio(blobUrl, playbackRate = 1.0) {
         return new Promise((resolve, reject) => {
             stopAudio();
 
             const audio = new Audio(blobUrl);
+            const clampedRate = Math.max(0.5, Math.min(1.2, playbackRate));
+            audio.playbackRate = clampedRate;
+            if ('preservesPitch' in audio) audio.preservesPitch = true;
+            if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
             state.currentAudio = audio;
             state.currentAudioResolve = resolve;
+            state.currentAudioReject = reject;
             state.isSpeaking = true;
 
             audio.onended = () => {
@@ -199,6 +208,7 @@
                 state.isSpeaking = false;
                 state.currentAudio = null;
                 state.currentAudioResolve = null;
+                state.currentAudioReject = null;
                 resolve();
             };
 
@@ -207,35 +217,60 @@
                 state.isSpeaking = false;
                 state.currentAudio = null;
                 state.currentAudioResolve = null;
+                state.currentAudioReject = null;
                 reject(new Error('Audio playback failed'));
             };
 
             // Handle abort
-            if (state.abortController) {
-                state.abortController.signal.addEventListener('abort', () => {
+            const activeAbortController = state.abortController;
+            if (activeAbortController) {
+                const onAbort = () => {
                     if (state.currentAudio !== audio) return;
                     audio.pause();
                     audio.currentTime = 0;
                     state.isSpeaking = false;
                     state.currentAudio = null;
                     state.currentAudioResolve = null;
+                    state.currentAudioReject = null;
                     reject(new Error('aborted'));
-                });
+                };
+
+                if (activeAbortController.signal.aborted) {
+                    onAbort();
+                    return;
+                }
+
+                activeAbortController.signal.addEventListener('abort', onAbort, { once: true });
             }
 
-            audio.play().catch(reject);
+            audio.play().catch((err) => {
+                if (state.currentAudio !== audio) return;
+                state.isSpeaking = false;
+                state.currentAudio = null;
+                state.currentAudioResolve = null;
+                state.currentAudioReject = null;
+                reject(err);
+            });
         });
     }
 
-    function stopAudio() {
+    function stopAudio({ rejectCurrent = false, reason = 'aborted' } = {}) {
         const resolveCurrent = state.currentAudioResolve;
+        const rejectCurrentFn = state.currentAudioReject;
         if (state.currentAudio) {
             state.currentAudio.pause();
             state.currentAudio.currentTime = 0;
             state.currentAudio = null;
         }
         state.currentAudioResolve = null;
+        state.currentAudioReject = null;
         state.isSpeaking = false;
+
+        if (rejectCurrent && rejectCurrentFn) {
+            rejectCurrentFn(new Error(reason));
+            return;
+        }
+
         if (resolveCurrent) {
             resolveCurrent();
         }
@@ -248,14 +283,15 @@
         if (!state.ttsAvailable) {
             throw new Error('Kokoro server unavailable');
         }
-        const blobUrl = await fetchTTSAudio(text, speed);
-        await playAudio(blobUrl);
+        // Keep model generation at stable rate and adjust playback on client side.
+        const blobUrl = await fetchTTSAudio(text, 1.0);
+        await playAudio(blobUrl, speed);
     }
 
     function speakWord(word) {
         if (!state.ttsAvailable) return;
-        fetchTTSAudio(word, 0.8)
-            .then(url => playAudio(url))
+        fetchTTSAudio(word, 1.0)
+            .then(url => playAudio(url, 0.8))
             .catch(e => {
                 console.warn('[TTS] Word synthesis failed:', e.message);
             });
@@ -359,39 +395,37 @@
         return segments;
     }
 
-    function getDictationSpeechSegments(texte) {
-        const phrases = splitIntoSentences(texte);
-        const dictationSegments = [];
+    function buildSentenceDictationText(sentence) {
+        const segments = splitSentenceByPunctuation(sentence);
+        const spokenParts = [];
 
-        phrases.forEach(phrase => {
-            const pieces = splitSentenceByPunctuation(phrase);
-            pieces.forEach(piece => {
-                if (piece.type === 'text') {
-                    dictationSegments.push(piece.value);
-                } else {
-                    dictationSegments.push(PUNCTUATION_RULES[piece.value].speak);
-                }
-            });
+        segments.forEach(segment => {
+            if (segment.type === 'text') {
+                spokenParts.push(segment.value);
+                return;
+            }
+
+            const punctRule = PUNCTUATION_RULES[segment.value];
+            if (punctRule) {
+                spokenParts.push(punctRule.speak);
+            }
         });
 
+        return spokenParts.join(', ').replace(/\s+/g, ' ').trim();
+    }
+
+    function getDictationSpeechSegments(texte) {
+        const phrases = splitIntoSentences(texte);
+        const dictationSegments = phrases.map(phrase => {
+            const spoken = buildSentenceDictationText(phrase);
+            return spoken || phrase;
+        });
         return { phrases, dictationSegments };
     }
 
     async function speakSentenceWithPunctuation(sentence, speed) {
-        const segments = splitSentenceByPunctuation(sentence);
-
-        for (const segment of segments) {
-            await waitForResume();
-
-            if (segment.type === 'text') {
-                await speakAsync(segment.value, speed);
-                continue;
-            }
-
-            const punctRule = PUNCTUATION_RULES[segment.value];
-            await speakAsync(punctRule.speak, speed);
-            await wait(punctRule.pauseMs);
-        }
+        const spokenSentence = buildSentenceDictationText(sentence) || sentence;
+        await speakAsync(spokenSentence, speed);
     }
 
     // -----------------------------------------------
@@ -454,11 +488,19 @@
     function wait(ms) {
         return new Promise((resolve, reject) => {
             const id = setTimeout(resolve, ms);
-            if (state.abortController) {
-                state.abortController.signal.addEventListener('abort', () => {
+            const activeAbortController = state.abortController;
+            if (activeAbortController) {
+                const onAbort = () => {
                     clearTimeout(id);
                     reject(new Error('aborted'));
-                });
+                };
+
+                if (activeAbortController.signal.aborted) {
+                    onAbort();
+                    return;
+                }
+
+                activeAbortController.signal.addEventListener('abort', onAbort, { once: true });
             }
         });
     }
@@ -472,6 +514,12 @@
             };
             check();
         });
+    }
+
+    function ensureActiveRun(runToken) {
+        if (runToken !== state.activeRunToken) {
+            throw new Error('aborted');
+        }
     }
 
     // -----------------------------------------------
@@ -612,11 +660,18 @@
     // Exam Flow
     // -----------------------------------------------
     async function startExam() {
+        if (state.examInProgress) {
+            console.warn('[Exam] start ignored: exam already in progress');
+            return;
+        }
+
         if (!state.ttsAvailable) {
             dom.phaseDescription.textContent = 'Serveur Kokoro indisponible. Lancez ./tts_server.sh puis rechargez la page.';
             return;
         }
 
+        state.examInProgress = true;
+        const runToken = ++state.activeRunToken;
         state.pregenSkipRequested = true;
         dom.btnSkipLectureIntro.style.display = 'none';
         dom.btnSkipPregen.style.display = 'none';
@@ -632,17 +687,20 @@
         state.timerInterval = setInterval(updateTimer, 1000);
 
         try {
-            await runLecture1();
-            await runDictee();
-            await runRelecture();
+            await runLecture1(runToken);
+            await runDictee(runToken);
+            await runRelecture(runToken);
             finishExam();
         } catch (e) {
             if (e.message === 'aborted') return;
             console.error('Exam flow error:', e);
+        } finally {
+            state.examInProgress = false;
         }
     }
 
-    async function runLecture1() {
+    async function runLecture1(runToken) {
+        ensureActiveRun(runToken);
         state.phase = 'lecture1';
         updatePhaseUI('lecture1');
         dom.currentWordDisplay.style.display = 'none';
@@ -655,19 +713,25 @@
 
         try {
             await speakAsync(announcements.lecture1, 1.0);
+            ensureActiveRun(runToken);
             if (!state.skipLectureIntroRequested) {
                 await wait(1500);
+                ensureActiveRun(runToken);
             }
         } finally {
             dom.btnSkipLectureIntro.style.display = 'none';
         }
 
+        ensureActiveRun(runToken);
         await waitForResume();
+        ensureActiveRun(runToken);
         await speakAsync(state.currentDictee.texte, state.dicteeSpeed);
+        ensureActiveRun(runToken);
         await wait(2000);
     }
 
-    async function runDictee() {
+    async function runDictee(runToken) {
+        ensureActiveRun(runToken);
         state.phase = 'dictee';
         updatePhaseUI('dictee');
 
@@ -677,14 +741,18 @@
 
         const announcements = buildPhaseAnnouncements(state.currentDictee);
         await speakAsync(announcements.dictee, 1.0);
+        ensureActiveRun(runToken);
         await wait(2000);
+        ensureActiveRun(runToken);
 
         // Official Brevet protocol: dictée "phrase par phrase"
         const phrases = splitIntoSentences(state.currentDictee.texte);
 
         for (let i = 0; i < phrases.length; i++) {
+            ensureActiveRun(runToken);
             state.currentGroupIndex = i;
             await waitForResume();
+            ensureActiveRun(runToken);
 
             dom.phaseCounter.textContent = `Phrase ${i + 1} / ${phrases.length}`;
             dom.currentWordText.textContent = phrases[i];
@@ -694,14 +762,18 @@
             dom.repeatIndicator.textContent = '1ère lecture';
             dom.currentWordLabel.textContent = 'Phrase actuelle :';
             await speakSentenceWithPunctuation(phrases[i], state.dicteeSpeed);
+            ensureActiveRun(runToken);
             await wait(2500);
+            ensureActiveRun(runToken);
 
             await waitForResume();
+            ensureActiveRun(runToken);
 
             // Second read
             state.currentRepeat = 1;
             dom.repeatIndicator.textContent = '2ème lecture';
             await speakSentenceWithPunctuation(phrases[i], state.dicteeSpeed);
+            ensureActiveRun(runToken);
             await wait(3500);
         }
 
@@ -710,26 +782,34 @@
         dom.repeatIndicator.textContent = '';
         dom.phaseCounter.textContent = '';
 
+        ensureActiveRun(runToken);
         await wait(2000);
     }
 
-    async function runRelecture() {
+    async function runRelecture(runToken) {
+        ensureActiveRun(runToken);
         state.phase = 'relecture';
         updatePhaseUI('relecture');
         dom.currentWordDisplay.style.display = 'none';
 
         const announcements = buildPhaseAnnouncements(state.currentDictee);
         await speakAsync(announcements.relecture, 1.0);
+        ensureActiveRun(runToken);
         await wait(1500);
+        ensureActiveRun(runToken);
 
         await waitForResume();
+        ensureActiveRun(runToken);
         await speakAsync(state.currentDictee.texte, state.dicteeSpeed);
+        ensureActiveRun(runToken);
         await wait(2000);
     }
 
     function finishExam() {
         state.phase = 'finished';
         updatePhaseUI('finished');
+        state.examInProgress = false;
+        state.skipTransitionInProgress = false;
 
         clearInterval(state.timerInterval);
 
@@ -743,26 +823,38 @@
     }
 
     function skipPhase() {
-        stopAudio();
+        if (state.skipTransitionInProgress) return;
+        state.skipTransitionInProgress = true;
+        state.examInProgress = true;
+
+        stopAudio({ rejectCurrent: true, reason: 'aborted' });
         state.isPaused = false;
 
         if (state.abortController) {
             state.abortController.abort();
         }
 
+        const runToken = ++state.activeRunToken;
         state.abortController = new AbortController();
 
+        const finishSkipTransition = () => {
+            state.skipTransitionInProgress = false;
+        };
+
         if (state.phase === 'lecture1') {
-            runDictee().then(runRelecture).then(finishExam).catch(e => {
+            runDictee(runToken).then(() => runRelecture(runToken)).then(finishExam).catch(e => {
                 if (e.message !== 'aborted') console.error(e);
-            });
+            }).finally(finishSkipTransition);
         } else if (state.phase === 'dictee') {
             dom.currentWordDisplay.classList.remove('active');
-            runRelecture().then(finishExam).catch(e => {
+            runRelecture(runToken).then(finishExam).catch(e => {
                 if (e.message !== 'aborted') console.error(e);
-            });
+            }).finally(finishSkipTransition);
         } else if (state.phase === 'relecture') {
             finishExam();
+            finishSkipTransition();
+        } else {
+            finishSkipTransition();
         }
     }
 
@@ -943,6 +1035,14 @@
     function bindEvents() {
         dom.navAccueil.addEventListener('click', () => {
             stopAudio();
+            if (state.abortController) {
+                state.abortController.abort();
+            }
+            state.abortController = null;
+            state.examInProgress = false;
+            state.skipTransitionInProgress = false;
+            state.activeRunToken += 1;
+            clearInterval(state.timerInterval);
             switchSection('accueil');
         });
         dom.navExamen.addEventListener('click', () => switchSection('examen'));
@@ -1002,9 +1102,16 @@
         dom.btnNewDictee.addEventListener('click', () => {
             stopAudio();
             clearInterval(state.timerInterval);
+            if (state.abortController) {
+                state.abortController.abort();
+            }
+            state.abortController = null;
             state.pregenSkipRequested = true;
             state.pregenInProgress = false;
             state.skipLectureIntroRequested = false;
+            state.skipTransitionInProgress = false;
+            state.examInProgress = false;
+            state.activeRunToken += 1;
             dom.btnSkipLectureIntro.style.display = 'none';
             // Clear audio cache
             state.audioCache.forEach(url => URL.revokeObjectURL(url));

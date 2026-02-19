@@ -185,8 +185,21 @@ def synthesize(req: SpeechRequest):
                 if not results:
                     raise HTTPException(status_code=500, detail="No audio generated")
 
-                sample_rate = getattr(results[0], 'sample_rate', sample_rate)
-                chunk_audios.append(to_numpy_audio(results[0].audio))
+                generated_parts: list[np.ndarray] = []
+                for generated in results:
+                    generated_audio = getattr(generated, 'audio', None)
+                    if generated_audio is None:
+                        continue
+                    sample_rate = getattr(generated, 'sample_rate', sample_rate)
+                    generated_parts.append(to_numpy_audio(generated_audio))
+
+                if not generated_parts:
+                    raise HTTPException(status_code=500, detail="No audio generated")
+
+                if len(generated_parts) == 1:
+                    chunk_audios.append(generated_parts[0])
+                else:
+                    chunk_audios.append(np.concatenate(generated_parts))
 
         if not chunk_audios:
             raise HTTPException(status_code=500, detail="No audio generated")
