@@ -60,6 +60,32 @@ Ouvrez votre navigateur sur : **[http://localhost:8081](http://localhost:8081)**
 
 ---
 
+## ⚙️ Orchestration (Nouveau)
+
+Pour démarrer/arrêter toute la stack (TTS + web) avec une seule commande :
+
+```bash
+chmod +x dev_stack.sh
+./dev_stack.sh start npm      # TTS natif + web via npm start (port 3001)
+# ou
+./dev_stack.sh start docker   # TTS natif + web via docker compose (port 8081)
+```
+
+Commandes disponibles :
+
+```bash
+./dev_stack.sh status
+./dev_stack.sh stop
+./dev_stack.sh restart npm
+```
+
+Logs :
+
+- `logs/tts_server.log`
+- `logs/web_server.log`
+
+---
+
 ## 🏗️ Architecture
 
 ```mermaid

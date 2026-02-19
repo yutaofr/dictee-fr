@@ -39,8 +39,9 @@ graph TD
 - **Stack**: Vanilla JS / HTML5 / CSS3 (No frameworks for minimal overhead).
 - **State Management**: Centralized `state` object in `app.js`.
 - **Audio Strategy**:
-    - **Pre-generation**: Whole text is split into sentences and fetched from backend immediately after dictée selection to ensure zero-latency playback.
-    - **Fallback**: Automatically falls back to the browser's `Web Speech API` if the backend TTS is unreachable.
+    - **Pre-generation**: Phase announcements and phrase-level dictation scripts are fetched after dictée selection.
+    - **Phase 2 stability**: Each sentence is synthesized as one TTS request with spoken punctuation markers (for example, `virgule`, `point`) to reduce truncation/repetition risks.
+    - **Speed handling**: Model generation stays at `1.0`; playback rate is adjusted client-side.
 
 ---
 
@@ -52,7 +53,8 @@ The logic in `app.js` is strictly aligned with the official French "Diplôme Nat
 2.  **Phase 2 (Dictée effective)**:
     - Text is split into **sentences** (phrase par phrase) using regex: `/(?<=[.!?])\s+/`.
     - Each sentence is read **twice** at a slower speed (default 0.85x).
-    - Hardcoded pauses: 4 seconds after the first read, 5 seconds after the second.
+    - Dictation uses one synthesized phrase per read with punctuation announced inside the phrase.
+    - Hardcoded pauses: 2.5 seconds after the first read, 3.5 seconds after the second.
 3.  **Phase 3 (Relecture)**: Full text is read one final time at natural speed (1.0x) for final corrections.
 
 ---
@@ -99,6 +101,7 @@ The logic in `app.js` is strictly aligned with the official French "Diplôme Nat
 - `/dictees.js`: Data store for dictation texts and grammar rules.
 - `/tts_server.py`: Native Python bridge for the MLX model.
 - `/tts_server.sh`: Setup and launch script for the local AI environment.
+- `/dev_stack.sh`: Start/stop/status orchestrator for TTS + web stack.
 - `/docker-compose.yml`: Container orchestration (web app only).
 - `/Dockerfile`: Alpine-based Node.js production image.
 
@@ -130,4 +133,4 @@ The application's primary value is its alignment with the **Official Brevet 2026
 ### 5. Deployment Rule
 - Run TTS server natively: `./tts_server.sh`.
 - Run Web app via Docker: `docker-compose up`.
-
+- Or run both with orchestrator: `./dev_stack.sh start npm|docker`.
