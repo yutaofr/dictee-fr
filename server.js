@@ -7,6 +7,7 @@ import express from 'express';
 import { createHash } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { DICTEES } from './dictees.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -203,6 +204,11 @@ app.get('/api/health', async (req, res) => {
         model: TTS_MODEL,
         cacheSize: audioCache.size
     });
+});
+
+// Dictées data endpoint
+app.get('/api/dictees', (req, res) => {
+    res.json(DICTEES);
 });
 
 // -----------------------------------------------

@@ -33,21 +33,23 @@ graph TD
 - **API Endpoints**:
     - `POST /api/tts`: Primary endpoint. Accepts `{ text }`. Returns `audio/wav`.
     - `POST /api/tts/batch`: For pre-generating multiple segments at once.
+    - `GET /api/dictees`: Serves the list of dictations as JSON.
     - `GET /api/health`: Monitors connectivity to the local TTS server via `host.docker.internal`.
 
-#### **C. Frontend (Core Logic)**
-- **Stack**: Vanilla JS / HTML5 / CSS3 (No frameworks for minimal overhead).
-- **State Management**: Centralized `state` object in `app.js`.
+#### **C. Frontend (Core Modular Logic)**
+- **Stack**: Vanilla JS / HTML5 / CSS3 (Modular ES Modules).
+- **State Management**: Centralized `state.js` module.
 - **Audio Strategy**:
-    - **Pre-generation**: Phase announcements and phrase-level dictation scripts are fetched after dictée selection.
-    - **Phase 2 stability**: Each sentence is synthesized as one TTS request with spoken punctuation markers (for example, `virgule`, `point`) to reduce truncation/repetition risks.
+    - **Pre-generation**: Managed by `tts.js`. Phase announcements and phrase-level dictation scripts are fetched after dictée selection.
+    - **Phase 2 stability**: Each sentence is synthesized as one TTS request with spoken punctuation markers.
     - **Speed handling**: Model generation stays at `1.0`; playback rate is adjusted client-side.
+- **Testing**: Vitest for core logic unit tests (see `src/__tests__`).
 
 ---
 
 ## 📜 Official Dictée Protocol (Brevet 2026)
 
-The logic in `app.js` is strictly aligned with the official French "Diplôme National du Brevet" protocol:
+The logic in `src/exam-flow.js` is strictly aligned with the official French "Diplôme National du Brevet" protocol:
 
 1.  **Phase 1 (Lecture intégrale)**: Full text is read once at natural speed (1.0x). No writing allowed.
 2.  **Phase 2 (Dictée effective)**:
@@ -80,9 +82,9 @@ The logic in `app.js` is strictly aligned with the official French "Diplôme Nat
 ## 🚀 Future Development Guidelines
 
 ### Adding New Dictées
-- Modify `dictees.js`.
+- Modify `dictees.js` (now an ES module).
 - Ensure `texte` contains proper sentence punctuation for the splitter.
-- The `groupes` array is currently retained for historical compatibility but is **deprecated** by the official "Sentence Splitter" logic.
+- The backend serves this file via `GET /api/dictees`.
 
 ### UI Modifications
 - Central CSS is in `style.css`.
@@ -96,12 +98,18 @@ The logic in `app.js` is strictly aligned with the official French "Diplôme Nat
 
 ## 📦 File Structure Mapping
 
-- `/app.js`: Main frontend controller and dictation lifecycle logic.
-- `/server.js`: Node.js server, caching, and host-bridge networking.
-- `/dictees.js`: Data store for dictation texts and grammar rules.
-- `/tts_server.py`: Native Python bridge for the MLX model.
-- `/tts_server.sh`: Setup and launch script for the local AI environment.
-- `/dev_stack.sh`: Start/stop/status orchestrator for TTS + web stack.
+- `src/main.js`: Main entry point and bootstrap logic.
+- `src/exam-flow.js`: Dictation lifecycle and protocol state machine.
+- `src/ui.js`: DOM manipulation and event bindings.
+- `src/tts.js`: Audio management and Kokoro proxy client.
+- `src/correction.js`: Diff calculation and parsing logic.
+- `src/state.js`: Centralized shared state.
+- `src/__tests__/`: Vitest unit tests for core logic.
+- `server.js`: Node.js server, caching, and host-bridge networking.
+- `dictees.js`: Data store for dictation texts.
+- `tts_server.py`: Native Python bridge for the MLX model.
+- `tts_server.sh`: Setup and launch script for the local AI environment.
+- `dev_stack.sh`: Start/stop/status orchestrator for TTS + web stack.
 - `/docker-compose.yml`: Container orchestration (web app only).
 - `/Dockerfile`: Alpine-based Node.js production image.
 
@@ -115,7 +123,7 @@ To ensure efficient future interactions with LLMs and Coding Agents, follow thes
 The application's primary value is its alignment with the **Official Brevet 2026 Protocol**.
 - **Rule**: Do not modify the 3-phase structure (Lecture → Dictée → Relecture).
 - **Rule**: Phase 2 must always read "phrase par phrase" (sentence by sentence), splitting at `.!?`.
-- **Logic Location**: `runDictee()` in `app.js`.
+- **Logic Location**: `runDictee()` in `src/exam-flow.js`.
 
 ### 2. Hardware Constraint (Metal)
 - **Invariant**: The MLX model **must** run on the host Mac OS, not inside Docker.

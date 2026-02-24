@@ -2,9 +2,10 @@
 
 ## Project Structure & Module Organization
 This project is a single-repo web app with a local TTS backend:
-- `index.html`, `style.css`, `app.js`: frontend UI and dictation flow.
-- `dictees.js`: dictation content and metadata.
-- `server.js`: Node.js API/static server (`/api/tts`, `/api/tts/batch`, `/api/health`).
+- `index.html`, `style.css`: HTML template and global styles.
+- `src/`: Modular ES frontend logic (main, ui, tts, correction, exam-flow, state).
+- `dictees.js`: dictation content (ES module).
+- `server.js`: Node.js proxy with caching and dictation API (`/api/tts`, `/api/dictees`).
 - `tts_server.py`, `tts_server.sh`: native macOS FastAPI TTS service (Apple Silicon/Metal).
 - `docker-compose.yml`, `Dockerfile`: containerized web runtime.
 - `README.md`, `TECHNICAL_SPEC.md`: product and architecture docs.
@@ -26,12 +27,15 @@ Run TTS server first, then web app, to avoid fallback to browser speech synthesi
 No lint/formatter config is committed yet; keep diffs small and consistent with neighboring code.
 
 ## Testing Guidelines
-There is no automated test suite yet. Validate changes manually:
-1. `GET /api/health` returns `status: "ok"` and expected TTS reachability.
-2. Full dictation flow works (lecture, phrase-by-phrase dictée, relecture).
-3. Correction and pronunciation tabs still function after UI/logic edits.
+Use **Vitest** for unit testing core logic.
+1. Run tests: `docker run --rm -v $(pwd):/app -w /app node:lts-alpine npm test`.
+2. Manual Validation:
+    - `GET /api/health` returns TTS reachability.
+    - `GET /api/dictees` returns valid JSON data.
+    - Full flow: lecture, phrase-by-phrase dictée, relecture.
+    - Correction tabs function correctly.
 
-When adding tests, place them in a new `tests/` directory and name files by feature (example: `server.tts.test.js`).
+Place new tests in `src/__tests__/` naming them `.test.js`.
 
 ## Commit & Pull Request Guidelines
 Recent history uses concise, prefixed messages (for example `Docs: ...`, `Fix: ...`). Follow:
@@ -42,4 +46,4 @@ Recent history uses concise, prefixed messages (for example `Docs: ...`, `Fix: .
 ## Security & Configuration Notes
 - Do not commit secrets or local machine paths.
 - Keep `TTS_SERVER_URL` environment-driven; default is `http://host.docker.internal:8000` for Docker-to-host bridging.
-- Preserve the official 3-phase dictation protocol behavior when modifying `app.js`.
+- Preserve the official 3-phase dictation protocol behavior when modifying `src/exam-flow.js`.

@@ -5,9 +5,14 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "vitest run"
   },
   "dependencies": {
     "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.0",
+    "vitest": "^2.0.0"
   }
 }

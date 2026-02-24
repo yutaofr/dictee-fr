@@ -8,7 +8,7 @@
 //   - points de grammaire à vérifier
 //   - annotations pour la correction guidée
 
-const DICTEES = [
+export const DICTEES = [
   {
     id: 1,
     titre: "Le souvenir d'enfance",
@@ -471,7 +471,3 @@ const DICTEES = [
   }
 ];
 
-// Exporter pour utilisation dans app.js
-if (typeof window !== 'undefined') {
-  window.DICTEES = DICTEES;
-}
