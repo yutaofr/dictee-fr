@@ -5,7 +5,7 @@
 - [x] Task: Setup the inference environment (dependencies, model download script).
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Research & Setup' (Protocol in workflow.md)
 
-## Phase 2: Core Generation Logic
+## Phase 2: Core Generation Logic [checkpoint: cc46691]
 - [x] Task: Implement the Python inference script for text generation.
     - [x] Write unit tests for the generation prompt and output format.
     - [x] Implement the generation logic with MLX.
