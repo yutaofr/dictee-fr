@@ -63,19 +63,21 @@ async function init() {
     }
 
     // Render the dictée selection grid
-    renderDicteeGrid(DICTEES, (dictee) => {
+    const onSelect = (dictee) => {
         selectDictee(dictee, {
             getDictationSegments: getDictationSpeechSegments,
             buildAnnouncements: buildPhaseAnnouncements,
         });
-    });
+    };
+
+    renderDicteeGrid(DICTEES, onSelect);
 
     // Setup UI controls
     setupVoiceSelector();
     setupSpeedSlider();
 
     // Wire all action-producing events
-    bindEvents({ startExam, skipPhase, goToCorrection });
+    bindEvents({ startExam, skipPhase, goToCorrection }, onSelect);
 
     // Check TTS backend availability
     await checkBackendHealth();

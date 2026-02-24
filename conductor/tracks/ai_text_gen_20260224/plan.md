@@ -19,7 +19,7 @@
 - [~] Task: Conductor - User Manual Verification 'Phase 3: Backend & API Integration' (Protocol in workflow.md)
 
 ## Phase 4: Frontend Implementation
-- [ ] Task: Add UI elements for triggering AI generation.
-    - [ ] Implement the "Générer une dictée" button and loading state.
-    - [ ] Bind the UI to the new API endpoint.
-- [ ] Task: Conductor - User Manual Verification 'Phase 4: Frontend Implementation' (Protocol in workflow.md)
+- [x] Task: Add UI elements for triggering AI generation.
+    - [x] Implement the "Générer une dictée" button and loading state.
+    - [x] Bind the UI to the new API endpoint.
+- [~] Task: Conductor - User Manual Verification 'Phase 4: Frontend Implementation' (Protocol in workflow.md)

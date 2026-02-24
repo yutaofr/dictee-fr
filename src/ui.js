@@ -130,6 +130,22 @@ export function switchSection(name) {
 // -----------------------------------------------
 export function renderDicteeGrid(dictees, onSelect) {
     $('dictee-grid').innerHTML = '';
+    
+    // 1. Add the "Generate" card
+    const genCard = document.createElement('div');
+    genCard.className = 'dictee-card card-generate';
+    genCard.innerHTML = `
+        <div class="card-icon">🪄</div>
+        <h4>Générer une dictée</h4>
+        <p class="card-preview">Créez un texte inédit sur le thème de votre choix grâce à l'IA.</p>
+        <span class="card-start-btn">Essayer maintenant →</span>
+    `;
+    genCard.addEventListener('click', () => {
+        $('modal-generation').style.display = 'flex';
+        $('input-theme').focus();
+    });
+    $('dictee-grid').appendChild(genCard);
+
     const diffLabels = { 1: 'Facile', 2: 'Moyen', 3: 'Difficile' };
 
     dictees.forEach(dictee => {
@@ -321,9 +337,10 @@ export async function checkBackendHealth() {
 // -----------------------------------------------
 // Event bindings
 // actions = { startExam, skipPhase, goToCorrection }
+// onSelectDictee: function to trigger when a dictée is chosen
 // Passed from main.js to break circular dependency.
 // -----------------------------------------------
-export function bindEvents(actions) {
+export function bindEvents(actions, onSelectDictee) {
     const { startExam, skipPhase, goToCorrection } = actions;
 
     $('nav-accueil').addEventListener('click', () => {
@@ -378,6 +395,66 @@ export function bindEvents(actions) {
 
     $('btn-skip-phase').addEventListener('click', skipPhase);
     $('btn-finish').addEventListener('click', goToCorrection);
+
+    // Generation Modal
+    const closeModal = () => {
+        $('modal-generation').style.display = 'none';
+        $('input-theme').value = '';
+        $('gen-loading').style.display = 'none';
+        $('btn-confirm-gen').disabled = false;
+    };
+
+    $('btn-close-modal').addEventListener('click', closeModal);
+    
+    $('modal-generation').addEventListener('click', (e) => {
+        if (e.target === $('modal-generation')) closeModal();
+    });
+
+    $('btn-confirm-gen').addEventListener('click', async () => {
+        const theme = $('input-theme').value.trim();
+        
+        $('gen-loading').style.display = 'block';
+        $('btn-confirm-gen').disabled = true;
+
+        try {
+            const res = await fetch('/api/generate-dictee', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ theme })
+            });
+
+            if (!res.ok) throw new Error(`Erreur génération : ${res.status}`);
+            
+            const data = await res.json();
+            const generatedText = data.text;
+
+            // Create a pseudo-dictee object
+            const newDictee = {
+                id: `gen-${Date.now()}`,
+                titre: theme ? `Dictée : ${theme}` : 'Dictée Générée',
+                auteur: 'Intelligence Artificielle',
+                oeuvre: 'Dictée Brevet 2026',
+                annee: new Date().getFullYear(),
+                theme: theme || 'Général',
+                difficulte: 2,
+                texte: generatedText,
+                regles: [
+                    { mot: "IA", explication: "Texte généré dynamiquement.", type: "vocabulaire" }
+                ]
+            };
+
+            closeModal();
+            
+            // Automatically select and start this new dictée
+            if (onSelectDictee) onSelectDictee(newDictee);
+
+        } catch (e) {
+            console.error('[UI] Generation failed:', e);
+            alert(`Désolé, la génération a échoué : ${e.message}`);
+            $('gen-loading').style.display = 'none';
+            $('btn-confirm-gen').disabled = false;
+        }
+    });
 
     [$('tab-comparaison'), $('tab-regles'), $('tab-prononciation')].forEach(btn => {
         btn.addEventListener('click', () => {
