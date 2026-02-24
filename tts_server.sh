@@ -17,8 +17,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Free port 8000 if occupied
+if lsof -i :8000 -t >/dev/null; then
+    echo "[TTS] Port 8000 is occupied. Cleaning up..."
+    kill -9 $(lsof -t -i :8000) 2>/dev/null || true
+fi
+
 # Install dependencies if needed
-for pkg in mlx-audio fastapi uvicorn; do
+for pkg in mlx-audio mlx-lm fastapi uvicorn; do
     if ! python3 -c "import ${pkg//-/_}" 2>/dev/null; then
         echo "[TTS] Installing $pkg..."
         pip install "$pkg"
