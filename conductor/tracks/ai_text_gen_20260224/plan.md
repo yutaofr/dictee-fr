@@ -18,7 +18,7 @@
     - [x] Implement the proxy logic to call the Python generation service.
 - [~] Task: Conductor - User Manual Verification 'Phase 3: Backend & API Integration' (Protocol in workflow.md)
 
-## Phase 4: Frontend Implementation
+## Phase 4: Frontend Implementation [checkpoint: 17037d5]
 - [x] Task: Add UI elements for triggering AI generation.
     - [x] Implement the "Générer une dictée" button and loading state.
     - [x] Bind the UI to the new API endpoint.
