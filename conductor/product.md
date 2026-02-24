@@ -11,7 +11,7 @@ To provide French 3ème students with a premium, accessible, and distraction-fre
 # Key Features
 - **AI-Powered Dictation Protocol:** Strictly adheres to the official 3-phase exam format (Lecture, Dictation, Relecture).
 - **Human-like Speech:** Utilizes Kokoro-82M (MLX) for natural prosody and pronunciation.
-- **Dynamic Content Generation:** Ability to generate new, level-appropriate dictation texts using AI to ensure an infinite supply of practice material.
+- **Dynamic Content Generation:** Ability to generate new, level-appropriate dictation texts using a local LLM (Qwen2.5-3B) to ensure an infinite supply of practice material.
 - **Intelligent Correction:** An automated system that identifies errors and links them directly to relevant French grammar rules for immediate learning.
 - **Local Progress Tracking:** Persistent storage of exam history and scores within the user's browser (localStorage) to monitor improvement over time.
 - **Premium UI:** A modern, immersive interface designed to reduce stress and improve focus during practice.

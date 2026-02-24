@@ -11,7 +11,7 @@
 - **Framework:** Express.
 - **Responsibilities:** 
   - Serving static frontend assets.
-  - Proxying TTS requests to the native Python server.
+  - Proxying TTS and LLM generation requests to the native Python server.
   - MD5-based audio caching.
 
 ## TTS Engine (AI Speech)
@@ -25,3 +25,9 @@
 - **Orchestration:** Shell scripts (`dev_stack.sh`, `tts_server.sh`) for hybrid native/containerized execution.
 - **Testing:** Vitest (Unit & Integration).
 - **Package Management:** npm.
+
+## Generative AI (Text Generation)
+- **Language:** Python 3.10+.
+- **Framework:** FastAPI (integrated with TTS server).
+- **AI Model:** Qwen2.5-3B-Instruct-4bit via MLX.
+- **Hardware Acceleration:** Metal (MPS) on Apple Silicon.
