@@ -12,7 +12,7 @@
 - [x] Task: Expose the generation logic via a FastAPI endpoint on the TTS server.
 - [~] Task: Conductor - User Manual Verification 'Phase 2: Core Generation Logic' (Protocol in workflow.md)
 
-## Phase 3: Backend & API Integration
+## Phase 3: Backend & API Integration [checkpoint: c9266ed]
 - [x] Task: Add the `/api/generate-dictee` endpoint to `server.js`.
     - [x] Write integration tests for the proxy endpoint.
     - [x] Implement the proxy logic to call the Python generation service.
