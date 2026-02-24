@@ -20,6 +20,7 @@ const PORT = process.env.PORT || 3001;
 // When running directly on host, use localhost.
 const TTS_SERVER_URL = process.env.TTS_SERVER_URL || 'http://host.docker.internal:8000';
 const TTS_ENDPOINT = `${TTS_SERVER_URL}/v1/audio/speech`;
+const GENERATE_ENDPOINT = `${TTS_SERVER_URL}/api/generate`;
 
 // Kokoro TTS model — extremely natural, human-like speech
 const TTS_MODEL = 'mlx-community/Kokoro-82M-bf16';
@@ -211,11 +212,49 @@ app.get('/api/dictees', (req, res) => {
     res.json(DICTEES);
 });
 
+// AI Generation endpoint
+app.post('/api/generate-dictee', async (req, res) => {
+    try {
+        const { theme } = req.body;
+
+        if (theme && typeof theme !== 'string') {
+            return res.status(400).json({ error: 'Invalid "theme" field' });
+        }
+
+        console.log(`[LLM] Requesting generation (theme: ${theme || 'any'})`);
+
+        const response = await fetch(GENERATE_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ theme }),
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`LLM server error ${response.status}: ${errText}`);
+        }
+
+        const data = await response.json();
+        res.json(data);
+
+    } catch (error) {
+        console.error('[LLM] Error:', error.message);
+        res.status(500).json({
+            error: 'AI generation failed',
+            detail: error.message
+        });
+    }
+});
+
 // -----------------------------------------------
 // Start
 // -----------------------------------------------
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Server] Dictée Brevet 2026 running on http://0.0.0.0:${PORT}`);
-    console.log(`[Server] TTS server: ${TTS_SERVER_URL}`);
-    console.log(`[Server] Model: ${TTS_MODEL}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`[Server] Dictée Brevet 2026 running on http://0.0.0.0:${PORT}`);
+        console.log(`[Server] TTS server: ${TTS_SERVER_URL}`);
+        console.log(`[Server] Model: ${TTS_MODEL}`);
+    });
+}
+
+export default app;

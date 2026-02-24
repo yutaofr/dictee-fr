@@ -13,10 +13,10 @@
 - [~] Task: Conductor - User Manual Verification 'Phase 2: Core Generation Logic' (Protocol in workflow.md)
 
 ## Phase 3: Backend & API Integration
-- [ ] Task: Add the `/api/generate-dictee` endpoint to `server.js`.
-    - [ ] Write integration tests for the proxy endpoint.
-    - [ ] Implement the proxy logic to call the Python generation service.
-- [ ] Task: Conductor - User Manual Verification 'Phase 3: Backend & API Integration' (Protocol in workflow.md)
+- [x] Task: Add the `/api/generate-dictee` endpoint to `server.js`.
+    - [x] Write integration tests for the proxy endpoint.
+    - [x] Implement the proxy logic to call the Python generation service.
+- [~] Task: Conductor - User Manual Verification 'Phase 3: Backend & API Integration' (Protocol in workflow.md)
 
 ## Phase 4: Frontend Implementation
 - [ ] Task: Add UI elements for triggering AI generation.
