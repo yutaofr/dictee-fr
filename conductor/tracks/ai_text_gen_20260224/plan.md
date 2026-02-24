@@ -6,11 +6,11 @@
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Research & Setup' (Protocol in workflow.md)
 
 ## Phase 2: Core Generation Logic
-- [ ] Task: Implement the Python inference script for text generation.
-    - [ ] Write unit tests for the generation prompt and output format.
-    - [ ] Implement the generation logic with MLX.
-- [ ] Task: Expose the generation logic via a FastAPI endpoint on the TTS server.
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Core Generation Logic' (Protocol in workflow.md)
+- [x] Task: Implement the Python inference script for text generation.
+    - [x] Write unit tests for the generation prompt and output format.
+    - [x] Implement the generation logic with MLX.
+- [x] Task: Expose the generation logic via a FastAPI endpoint on the TTS server.
+- [~] Task: Conductor - User Manual Verification 'Phase 2: Core Generation Logic' (Protocol in workflow.md)
 
 ## Phase 3: Backend & API Integration
 - [ ] Task: Add the `/api/generate-dictee` endpoint to `server.js`.

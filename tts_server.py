@@ -26,15 +26,24 @@ MAX_CHUNK_CHARS = 220           # Keep phonemizer input short for stable French 
 CHUNK_GAP_SECONDS = 0.10        # Tiny pause between chunks for natural flow
 
 # -----------------------------------------------
-# Load model at startup
+# Model config — LLM: text generation for dictations
+# -----------------------------------------------
+LLM_MODEL_NAME = "mlx-community/Qwen2.5-3B-Instruct-4bit"
+
+# -----------------------------------------------
+# Load models at startup
 # -----------------------------------------------
 print(f"[TTS] Loading model: {MODEL_NAME}")
-
 from mlx_audio.tts.utils import load_model
 model = load_model(MODEL_NAME)
+
+print(f"[LLM] Loading model: {LLM_MODEL_NAME}")
+from mlx_lm import load as load_llm, generate as generate_llm
+llm_model, llm_tokenizer = load_llm(LLM_MODEL_NAME)
+
 model_lock = threading.Lock()
 
-print("[TTS] Model loaded! Server ready.")
+print("[SERVER] All models loaded! Server ready.")
 
 # -----------------------------------------------
 # FastAPI app
@@ -48,6 +57,11 @@ class SpeechRequest(BaseModel):
     voice: str = DEFAULT_VOICE
     speed: float = DEFAULT_SPEED
     lang_code: str = DEFAULT_LANG
+
+
+class GenerateRequest(BaseModel):
+    theme: str = None
+    max_tokens: int = 500
 
 
 def audio_to_wav_bytes(audio_array, sample_rate: int = 24000) -> bytes:
@@ -149,7 +163,43 @@ def split_text_for_tts(text: str, max_chars: int = MAX_CHUNK_CHARS) -> list[str]
 
 @app.get("/v1/models")
 def list_models():
-    return {"object": "list", "data": [{"id": MODEL_NAME, "object": "model"}]}
+    return {"object": "list", "data": [
+        {"id": MODEL_NAME, "object": "model", "type": "tts"},
+        {"id": LLM_MODEL_NAME, "object": "model", "type": "llm"}
+    ]}
+
+
+@app.post("/api/generate")
+def generate_text(req: GenerateRequest):
+    try:
+        # Build prompt using the same logic as tested in src/test_generation.py
+        base_prompt = "Tu es un professeur de français expert dans la préparation au Brevet des collèges. "
+        base_prompt += "Génère un texte de dictée original pour des élèves de 3ème. "
+        base_prompt += "Le texte doit être court (environ 50-80 mots), avoir un sens littéraire, "
+        base_prompt += "et inclure des difficultés grammaticales classiques du Brevet (accords complexes, conjugaisons). "
+        
+        if req.theme:
+            base_prompt += f"Le thème est : {req.theme}. "
+        
+        base_prompt += "\nRéponds UNIQUEMENT avec le texte de la dictée. Pas d'introduction, pas de conclusion, pas de commentaires."
+
+        messages = [{"role": "user", "content": base_prompt}]
+        prompt = llm_tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+        print(f"[LLM] Generating dictation (theme: {req.theme or 'any'})...")
+        
+        with model_lock:
+            response = generate_llm(llm_model, llm_tokenizer, prompt=prompt, verbose=False, max_tokens=req.max_tokens)
+        
+        generated_text = response.strip()
+        print(f"[LLM] Generated {len(generated_text)} chars.")
+        
+        return {"text": generated_text}
+
+    except Exception as e:
+        print(f"[LLM] Error: {e}")
+        import traceback; traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/v1/audio/speech")
