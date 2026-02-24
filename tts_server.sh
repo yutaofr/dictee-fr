@@ -21,6 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if lsof -i :8000 -t >/dev/null; then
     echo "[TTS] Port 8000 is occupied. Cleaning up..."
     kill -9 $(lsof -t -i :8000) 2>/dev/null || true
+    sleep 1 # Wait for the port to be fully released
 fi
 
 # Install dependencies if needed
