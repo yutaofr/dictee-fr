@@ -1,6 +1,6 @@
 # Implementation Plan: AI-Driven Dictation Text Generation
 
-## Phase 1: Research & Setup
+## Phase 1: Research & Setup [checkpoint: 0134089]
 - [x] Task: Research and select the most adequate local MLX model for French text generation (balancing memory vs. quality).
 - [x] Task: Setup the inference environment (dependencies, model download script).
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Research & Setup' (Protocol in workflow.md)
