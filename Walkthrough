@@ -1,0 +1,143 @@
+# Dictée Brevet 2026 — 项目全面审查
+
+## 📊 项目概览
+
+| 维度 | 详情 |
+|------|------|
+| **目标** | 法国初中毕业考试（Brevet 2026）听写模拟器 |
+| **用户群** | 法国3ème（初三）学生 |
+| **技术栈** | Vanilla JS + Express + FastAPI (Kokoro TTS on Apple Silicon) |
+| **代码量** | ~3,300 行 (JS+HTML+CSS+Python) |
+| **依赖** | 仅 `express` 一个 npm 依赖，极简 |
+
+---
+
+## 🏗️ 架构评估
+
+```mermaid
+graph TD
+    subgraph "Docker Container (port 8081)"
+        A["index.html + app.js + style.css"] --> B["server.js (Express)"]
+    end
+    subgraph "Native Host (Apple Silicon Metal GPU)"
+        C["tts_server.py (FastAPI + Kokoro MLX)"]
+    end
+    B -->|"HTTP POST /v1/audio/speech"| C
+    D["dev_stack.sh"] -->|orchestrate| B
+    D -->|orchestrate| C
+```
+
+**架构亮点：**
+- 混合执行模型设计正确：TTS 必须直接访问 Metal GPU (MPS)，不能进 Docker
+- 双层缓存策略（server.js 内存缓存 + in-flight 去重），有效减少重复请求
+- `dev_stack.sh` 编排脚本完整支持 npm / docker 两种模式，带 PID 管理和日志
+
+---
+
+## ✅ 做得好的地方
+
+### 1. 协议还原度高
+三阶段听写流程严格遵守 Brevet 官方协议：
+- **Phase 1** — 全文朗读（不写）
+- **Phase 2** — 按句子听写，每句读两遍，播报标点（virgule, point 等）
+- **Phase 3** — 全文重读（可修改）
+
+### 2. UI 设计质量
+- `style.css` 有完善的 CSS Design System：变量体系、glassmorphism、渐变、微动画
+- 色彩方案 Navy/Gold 很有「考试工具」的专业感
+- 响应式适配 `@media (max-width: 768px)` 完善
+- Playfair Display + Inter 的排版组合很优雅
+
+### 3. TTS 引擎设计
+- `tts_server.py` 长文本自动分段（`split_text_for_tts`），chunk 之间有自然间隔
+- 线程锁（`model_lock`）保护 Metal 编码器并发安全
+- OpenAI-compatible API 接口，上层透明切换模型很容易
+
+### 4. 前端状态管理
+- `app.js` 使用 `runToken` 机制防止多次启动流程冲突
+- AbortController 管理异步取消，Pause/Resume 实现完整
+- 预生成音频（`pregenerate`）提前缓存关键段落
+
+### 5. 已修复的历史问题
+根据对话记录，之前已处理：
+- 音频首词截断 bug
+- 声音持久化问题
+- 可调速度滑块
+
+---
+
+## ⚠️ 需要关注的问题
+
+### 🔴 高优先级
+
+#### 1. `app.js` 体积过大（1130 行单文件）
+所有功能挤在一个 IIFE 里：TTS 引擎、UI 控制、考试流程、纠错对比、导航。每次改动都需要理解整个文件。
+
+> **建议**：拆分为模块：`tts.js`、`exam-flow.js`、`correction.js`、`ui.js`
+
+#### 2. 没有任何自动化测试
+`package.json` 里没有 `test` 脚本，也没有测试文件。所有验证都靠手动操作。对于考试协议逻辑（三阶段流程、标点播报、句子切分）这种容易回归的功能，缺少测试保护很危险。
+
+> **建议**：至少给核心纯函数加单测：`splitIntoSentences`、`splitSentenceByPunctuation`、`buildSentenceDictationText`、`runDiff`、`countSignsWithoutSpaces`
+
+#### 3. `dictees.js` 全局变量暴露
+`dictees.js` 中 `DICTEES` 以全局变量方式暴露（`const DICTEES = [...]`），通过 HTML `<script>` 标签加载。`app.js` 直接读 `window.DICTEES`。这种模式在 ES Module 已经是 `"type": "module"` 的项目中显得不一致。
+
+> **建议**：通过后端 API（如 `/api/dictees`）提供数据，或改为 ES Module export
+
+### 🟡 中优先级
+
+#### 4. 错误处理可以更友好
+- `fetchTTSAudio` 失败时只 console.error，用户看不到提示
+- TTS 服务挂掉后没有明显的 UI 降级或重试机制
+- `checkBackendHealth` 结果没有在 UI 上展示连接状态
+
+#### 5. Docker 配置缺少 `node_modules` 卷控制
+`docker-compose.yml` 中只挂载了源文件，但没有排除 `node_modules`。如果宿主机有 `node_modules`，可能和容器内的产生冲突。
+
+> **建议**：额外添加 `- /app/node_modules` 匿名卷
+
+#### 6. 安全隐患
+- `express.static(__dirname)` 直接暴露项目根目录，包含 `server.js`、`tts_server.py`、`package.json` 等后端文件
+- 没有 rate limiting，TTS 合成是 GPU 密集型操作
+
+### 🟢 低优先级
+
+#### 7. `package.json` 描述过时
+```json
+"description": "Simulateur de dictée Brevet 2026 avec TTS Qwen3-TTS"
+```
+已经换成 Kokoro TTS 了，描述里还提 Qwen3-TTS。
+
+#### 8. CSS 硬编码动画延迟
+```css
+.dictee-card:nth-child(1) { animation-delay: 0s; }
+...
+.dictee-card:nth-child(6) { animation-delay: 0.5s; }
+```
+只支持前 6 张卡，如果扩充题库会失效。可以用 JS 动态设置或 CSS `calc()` + 自定义属性。
+
+#### 9. 缓存没有持久化
+`server.js` 的音频缓存是纯内存 `Map`，上限 200 条。重启就丢。对于高频使用的题目，可以考虑磁盘缓存。
+
+---
+
+## 📁 文件结构总结
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| [app.js](file:///Users/weizhang/w/prof-fr/app.js) | 1130 | 前端主控：TTS 调用、考试流程状态机、纠错对比、UI 交互 |
+| [server.js](file:///Users/weizhang/w/prof-fr/server.js) | 216 | Node.js 后端：静态文件服务 + TTS 代理（含内存缓存 + in-flight 去重） |
+| [tts_server.py](file:///Users/weizhang/w/prof-fr/tts_server.py) | 233 | Python FastAPI TTS 服务：Kokoro-82M 模型，长文本分段合成 |
+| [dictees.js](file:///Users/weizhang/w/prof-fr/dictees.js) | 478 | 听写题库数据（含文本、分组、语法规则、标点说明） |
+| [index.html](file:///Users/weizhang/w/prof-fr/index.html) | 226 | 页面结构：首页/考试/纠正三个 Section |
+| [style.css](file:///Users/weizhang/w/prof-fr/style.css) | 1044 | 设计系统：Navy/Gold 主题、glassmorphism、响应式 |
+| [dev_stack.sh](file:///Users/weizhang/w/prof-fr/dev_stack.sh) | 304 | 编排脚本：统一管理 TTS 服务 + Web 服务的启停 |
+| [Dockerfile](file:///Users/weizhang/w/prof-fr/Dockerfile) | 12 | Web 容器：Alpine Node.js |
+| [docker-compose.yml](file:///Users/weizhang/w/prof-fr/docker-compose.yml) | 15 | 服务编排：端口映射 8081→3001 |
+
+---
+
+## 🎯 总结
+
+这是一个定位清晰、设计用心的教育工具。TTS 质量通过 Kokoro MLX 已经达到了很自然的水平，UI 也具有专业感。主要的提升空间在工程化层面：文件拆分、自动测试、错误处理和安全加固。功能上项目已经覆盖了完整的听写-纠正流程。
