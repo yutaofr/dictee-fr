@@ -137,9 +137,9 @@ export async function speakAsync(text, speed = 1.0) {
     if (!state.ttsAvailable) {
         throw new Error('Kokoro server unavailable');
     }
-    // Keep model generation at stable rate; adjust playback client-side
-    const blobUrl = await fetchTTSAudio(text, 1.0);
-    await playAudio(blobUrl, speed);
+    // Generate at target speed natively via Kokoro — no playback distortion
+    const blobUrl = await fetchTTSAudio(text, speed);
+    await playAudio(blobUrl, 1.0);
 }
 
 export function speakWord(word) {
