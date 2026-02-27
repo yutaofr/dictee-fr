@@ -130,7 +130,7 @@ export function switchSection(name) {
 // -----------------------------------------------
 export function renderDicteeGrid(dictees, onSelect) {
     $('dictee-grid').innerHTML = '';
-    
+
     // 1. Add the "Generate" card
     const genCard = document.createElement('div');
     genCard.className = 'dictee-card card-generate';
@@ -257,6 +257,7 @@ export function setupSpeedSlider() {
         const val = parseFloat(speedRange.value);
         state.dicteeSpeed = val;
         if (speedValue) speedValue.textContent = `${val.toFixed(2)}x`;
+        state.audioCache.clear();
         console.log('[UI] Reading speed adjusted:', val);
     });
 }
@@ -405,14 +406,14 @@ export function bindEvents(actions, onSelectDictee) {
     };
 
     $('btn-close-modal').addEventListener('click', closeModal);
-    
+
     $('modal-generation').addEventListener('click', (e) => {
         if (e.target === $('modal-generation')) closeModal();
     });
 
     $('btn-confirm-gen').addEventListener('click', async () => {
         const theme = $('input-theme').value.trim();
-        
+
         $('gen-loading').style.display = 'block';
         $('btn-confirm-gen').disabled = true;
 
@@ -424,7 +425,7 @@ export function bindEvents(actions, onSelectDictee) {
             });
 
             if (!res.ok) throw new Error(`Erreur génération : ${res.status}`);
-            
+
             const data = await res.json();
             const generatedText = data.text;
 
@@ -444,7 +445,7 @@ export function bindEvents(actions, onSelectDictee) {
             };
 
             closeModal();
-            
+
             // Automatically select and start this new dictée
             if (onSelectDictee) onSelectDictee(newDictee);
 
