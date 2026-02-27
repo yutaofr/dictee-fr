@@ -9,6 +9,8 @@ import {
     splitIntoSentences,
     splitSentenceByPunctuation,
     buildSentenceDictationText,
+    autoSegmentSentence,
+    getWordGroups,
     PUNCTUATION_RULES,
 } from '../exam-flow.js';
 
@@ -42,7 +44,6 @@ describe('splitIntoSentences', () => {
     });
 
     it('handles an ellipsis at sentence end (treated as trailing text)', () => {
-        // Ellipsis is not a sentence boundary in our splitter (only .!? are)
         const input = 'Il hésita… puis repartit. Elle attendait.';
         const result = splitIntoSentences(input);
         expect(result).toHaveLength(2);
@@ -109,7 +110,6 @@ describe('splitSentenceByPunctuation', () => {
 
 // -----------------------------------------------
 // buildSentenceDictationText
-// One test per French punctuation symbol supported
 // -----------------------------------------------
 describe('buildSentenceDictationText', () => {
     it('verbalizes comma as "virgule"', () => {
@@ -158,7 +158,6 @@ describe('buildSentenceDictationText', () => {
     });
 
     it('joins text and punctuation words with commas', () => {
-        // "Il marche" + ", virgule" → "Il marche, virgule, point"
         const result = buildSentenceDictationText('Il marche, lentement.');
         expect(result).toMatch(/Il marche/);
         expect(result).toMatch(/virgule/);
@@ -176,5 +175,179 @@ describe('buildSentenceDictationText', () => {
         required.forEach(punct => {
             expect(PUNCTUATION_RULES).toHaveProperty(punct);
         });
+    });
+});
+
+// -----------------------------------------------
+// autoSegmentSentence
+// -----------------------------------------------
+describe('autoSegmentSentence', () => {
+    it('returns empty array for empty input', () => {
+        expect(autoSegmentSentence('')).toEqual([]);
+        expect(autoSegmentSentence('   ')).toEqual([]);
+    });
+
+    it('returns the whole sentence when short enough', () => {
+        const result = autoSegmentSentence('Le petit Marcel marchait.');
+        expect(result).toHaveLength(1);
+        expect(result[0]).toBe('Le petit Marcel marchait.');
+    });
+
+    it('splits at commas', () => {
+        const sentence = 'La mer, furieuse et déchaînée, lançait ses vagues immenses contre les rochers.';
+        const result = autoSegmentSentence(sentence);
+        expect(result.length).toBeGreaterThan(1);
+        result.forEach(group => {
+            const wc = group.trim().split(/\s+/).length;
+            expect(wc).toBeLessThanOrEqual(10);
+        });
+    });
+
+    it('splits at grammatical boundaries (qui, que, dont, où)', () => {
+        const sentence = 'Il suivait son père qui portait sur son épaule un grand sac de toile rempli de provisions.';
+        const result = autoSegmentSentence(sentence);
+        // Should split a 16-word sentence into multiple groups
+        expect(result.length).toBeGreaterThan(1);
+        // No group should exceed HARD_MAX (10 words)
+        result.forEach(group => {
+            const wc = group.trim().split(/\s+/).length;
+            expect(wc).toBeLessThanOrEqual(10);
+        });
+    });
+
+    it('splits at coordinating conjunctions (et, mais, car)', () => {
+        const sentence = 'Les cigales chantaient dans les arbres et le soleil éclatant les obligeait à plisser les yeux.';
+        const result = autoSegmentSentence(sentence);
+        expect(result.length).toBeGreaterThan(1);
+    });
+
+    it('merges groups that are too short (< 3 words)', () => {
+        const sentence = 'Il dit : bonjour et merci, puis il partit rapidement.';
+        const result = autoSegmentSentence(sentence);
+        result.forEach(group => {
+            const wc = group.trim().split(/\s+/).length;
+            expect(wc).toBeGreaterThanOrEqual(3);
+        });
+    });
+
+    it('hard-splits very long fragments without natural breaks', () => {
+        const longFrag = 'un deux trois quatre cinq six sept huit neuf dix onze douze treize quatorze.';
+        const result = autoSegmentSentence(longFrag);
+        result.forEach(group => {
+            const wc = group.trim().split(/\s+/).length;
+            expect(wc).toBeLessThanOrEqual(10);
+        });
+    });
+
+    it('roundtrip: groups reconvert to original text', () => {
+        const sentence = 'Les pierres blanches brillaient sous la lumière, et quelques lézards effarouchés s\'enfuyaient à leur approche.';
+        const groups = autoSegmentSentence(sentence);
+        const reconstructed = groups.join(' ');
+        const normalizeWs = s => s.replace(/\s+/g, ' ').trim();
+        expect(normalizeWs(reconstructed)).toBe(normalizeWs(sentence));
+    });
+
+    it('roundtrip: multiple sentences from a real dictée text', () => {
+        const texte = `La neige tombait depuis le matin, recouvrant les toits et les chemins d'un épais manteau blanc. Les rues du village étaient désertes ; seul le boulanger, levé avant l'aube, avait allumé son four dont la chaleur bienfaisante réchauffait les murs de la boutique.`;
+        const sentences = texte.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+        for (const sentence of sentences) {
+            const groups = autoSegmentSentence(sentence);
+            const reconstructed = groups.join(' ');
+            const normalizeWs = s => s.replace(/\s+/g, ' ').trim();
+            expect(normalizeWs(reconstructed)).toBe(normalizeWs(sentence));
+        }
+    });
+});
+
+// -----------------------------------------------
+// getWordGroups
+// -----------------------------------------------
+describe('getWordGroups', () => {
+    it('uses manually curated groupes when they exist', () => {
+        const dictee = {
+            texte: 'Le petit Marcel marchait dans les collines parfumées de thym et de lavande.',
+            groupes: [
+                'Le petit Marcel',
+                'marchait dans les collines',
+                'parfumées de thym et de lavande.',
+            ],
+        };
+        const result = getWordGroups(dictee);
+        expect(result).toHaveLength(1); // 1 sentence
+        expect(result[0].groups).toEqual(dictee.groupes);
+    });
+
+    it('auto-segments when groupes is missing (AI-generated dictée)', () => {
+        const dictee = {
+            texte: 'La neige tombait depuis le matin, recouvrant les toits et les chemins.',
+        };
+        const result = getWordGroups(dictee);
+        expect(result).toHaveLength(1);
+        expect(result[0].groups.length).toBeGreaterThan(0);
+    });
+
+    it('auto-segments when groupes is empty array', () => {
+        const dictee = {
+            texte: 'Elle regardait le paysage. Il faisait beau.',
+            groupes: [],
+        };
+        const result = getWordGroups(dictee);
+        expect(result).toHaveLength(2);
+    });
+
+    it('maps multi-sentence groups correctly', () => {
+        const dictee = {
+            texte: 'Il fait beau. Le ciel est bleu.',
+            groupes: ['Il fait beau.', 'Le ciel est bleu.'],
+        };
+        const result = getWordGroups(dictee);
+        expect(result).toHaveLength(2);
+        expect(result[0].groups).toEqual(['Il fait beau.']);
+        expect(result[1].groups).toEqual(['Le ciel est bleu.']);
+    });
+
+    it('roundtrip: all auto-generated groups cover the full original text', () => {
+        const dictee = {
+            texte: `Gervaise regardait les grands boulevards avec un étonnement mêlé de crainte. La foule pressée, les omnibus qui passaient dans un vacarme assourdissant, les devantures illuminées des magasins, tout l'étourdissait.`,
+        };
+        const result = getWordGroups(dictee);
+        const allGroups = result.flatMap(block => block.groups);
+        const reconstructed = allGroups.join(' ');
+        const normalizeWs = s => s.replace(/\s+/g, ' ').trim();
+        expect(normalizeWs(reconstructed)).toBe(normalizeWs(dictee.texte));
+    });
+
+    it('handles real dictée data from dictees.js (dictée 1)', () => {
+        const dictee = {
+            texte: `Le petit Marcel marchait dans les collines parfumées de thym et de lavande. Il suivait son père qui portait sur l'épaule un grand sac de toile. Les cigales chantaient dans les arbres, et le soleil éclatant les obligeait à plisser les yeux. C'était un matin d'août, et l'enfant découvrait pour la première fois les merveilles de la garrigue provençale. Les pierres blanches brillaient sous la lumière, et quelques lézards effarouchés s'enfuyaient à leur approche. Il n'avait jamais été aussi heureux.`,
+            groupes: [
+                "Le petit Marcel",
+                "marchait dans les collines",
+                "parfumées de thym et de lavande.",
+                "Il suivait son père",
+                "qui portait sur l'épaule",
+                "un grand sac de toile.",
+                "Les cigales chantaient",
+                "dans les arbres,",
+                "et le soleil éclatant",
+                "les obligeait à plisser les yeux.",
+                "C'était un matin d'août,",
+                "et l'enfant découvrait",
+                "pour la première fois",
+                "les merveilles de la garrigue provençale.",
+                "Les pierres blanches",
+                "brillaient sous la lumière,",
+                "et quelques lézards effarouchés",
+                "s'enfuyaient à leur approche.",
+                "Il n'avait jamais été",
+                "aussi heureux."
+            ],
+        };
+        const result = getWordGroups(dictee);
+        // Should have 6 sentences
+        expect(result).toHaveLength(6);
+        // All pre-defined groups should appear in the output
+        const allGroups = result.flatMap(block => block.groups);
+        expect(allGroups).toEqual(dictee.groupes);
     });
 });

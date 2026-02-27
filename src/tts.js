@@ -156,38 +156,47 @@ export function speakWord(word) {
 // onProgress(current, total) and onComplete/onSkipped are UI
 // callback parameters so this module stays DOM-free.
 // -----------------------------------------------
-export async function pregenerate(dictee, { getDictationSegments, buildAnnouncements, onProgress, onComplete, onSkip }) {
+export async function pregenerate(dictee, { getWordGroupsFn, buildGroupText, buildAnnouncements, onProgress, onComplete, onSkip }) {
     if (!state.ttsAvailable) return;
 
     state.pregenInProgress = true;
     state.pregenSkipRequested = false;
 
     const announcements = buildAnnouncements(dictee);
-    const { dictationSegments } = getDictationSegments(dictee.texte);
     const dictSpeed = state.dicteeSpeed;
+
+    // Build group-level spoken segments for Phase 2
+    const sentenceBlocks = getWordGroupsFn(dictee);
+    const groupSpoken = [];
+    for (const block of sentenceBlocks) {
+        for (const group of block.groups) {
+            groupSpoken.push(buildGroupText(group));
+        }
+    }
 
     // Segments and their target generation speed:
     //   announcements (lecture1, dictee, relecture) → always 1.0
-    //   dictation content (full text + sentence segments) → dicteeSpeed
+    //   full text (Phase 1 + Phase 3) → dicteeSpeed
+    //   word groups (Phase 2) → dicteeSpeed
     const segments = [
         announcements.lecture1,
         dictee.texte,
         announcements.dictee,
-        ...dictationSegments,
+        ...groupSpoken,
         announcements.relecture,
     ];
     const speeds = [
-        1.0,                                      // lecture1 announcement
-        dictSpeed,                                // full text reading
-        1.0,                                      // dictee announcement
-        ...dictationSegments.map(() => dictSpeed),// sentence-by-sentence
-        1.0,                                      // relecture announcement
+        1.0,                                    // lecture1 announcement
+        dictSpeed,                              // full text reading
+        1.0,                                    // dictee announcement
+        ...groupSpoken.map(() => dictSpeed),    // group-by-group
+        1.0,                                    // relecture announcement
     ];
 
     state.pregenTotal = segments.length;
     state.pregenProgress = 0;
 
-    console.log(`[TTS] Pre-generating ${segments.length} audio segments at speed ${dictSpeed}...`);
+    console.log(`[TTS] Pre-generating ${segments.length} audio segments (${groupSpoken.length} groups) at speed ${dictSpeed}...`);
     onProgress(0, segments.length);
 
     for (let i = 0; i < segments.length; i++) {

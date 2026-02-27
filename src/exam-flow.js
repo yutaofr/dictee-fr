@@ -8,6 +8,8 @@
 //   splitSentenceByPunctuation     — segment a phrase into text/punctuation parts
 //   buildSentenceDictationText     — produce spoken form with punctuation announced
 //   getDictationSpeechSegments     — map all phrases to spoken segments
+//   autoSegmentSentence            — AI-like segmentation into word groups
+//   getWordGroups                  — get word groups (manual or auto-generated)
 //   buildDicteeKeyPointsText       — build TTS descriptor of key grammar points
 //   buildPhaseAnnouncements        — build phase 1/2/3 spoken announcements
 //   wait                           — abort-aware timer
@@ -15,7 +17,7 @@
 //   ensureActiveRun                — runToken guard
 //   updateTimer                    — update the elapsed timer display text
 //   runLecture1                    — Phase 1: full reading
-//   runDictee                      — Phase 2: sentence-by-sentence dictation
+//   runDictee                      — Phase 2: group-by-group dictation
 //   runRelecture                   — Phase 3: final re-read
 //   startExam                      — orchestrate all 3 phases
 //   skipPhase                      — skip to next phase
@@ -119,6 +121,172 @@ export function getDictationSpeechSegments(texte) {
         return spoken || phrase;
     });
     return { phrases, dictationSegments };
+}
+
+// -----------------------------------------------
+// Intelligent word-group segmentation
+// -----------------------------------------------
+
+// Grammatical boundary patterns for French — ordered by priority
+// These are points where a professor naturally pauses during dictation.
+const GROUP_SPLIT_PATTERNS = [
+    // Relative pronouns & subordinating conjunctions (clause boundaries)
+    /\s+(?=(?:qui|que|qu'|dont|où|lorsque|lorsqu'|quand|puisque|puisqu'|parce qu[e']|bien qu[e']|alors qu[e']|tandis qu[e']|afin qu[e'])\s)/i,
+    // Coordinating conjunctions
+    /\s+(?=(?:et|mais|ou|donc|or|ni|car)\s)/i,
+    // Prepositional phrases that start new semantic groups
+    /\s+(?=(?:dans|avec|sans|pour|par|sur|sous|vers|après|avant|depuis|contre|entre|chez|devant|derrière|pendant|malgré|jusqu'à|jusqu'au)\s)/i,
+];
+
+const MIN_GROUP_WORDS = 3;
+const MAX_GROUP_WORDS = 8;
+const HARD_MAX_GROUP_WORDS = 10;
+
+/**
+ * Count words in a text fragment.
+ */
+function wordCount(text) {
+    return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Auto-segment a single sentence into natural word groups.
+ * Strategy:
+ *   1. Split at intra-sentence punctuation (commas, semicolons, colons)
+ *   2. If any fragment > MAX_GROUP_WORDS, sub-split at grammatical boundaries
+ *   3. If still > HARD_MAX_GROUP_WORDS, split at the midpoint nearest a function word
+ *   4. Merge fragments < MIN_GROUP_WORDS with their neighbor
+ */
+export function autoSegmentSentence(sentence) {
+    const trimmed = sentence.trim();
+    if (!trimmed) return [];
+
+    // Step 1: Split at internal punctuation (keep punctuation attached to preceding text)
+    const punctSplit = trimmed.split(/(?<=[,;:])\s+/).map(s => s.trim()).filter(Boolean);
+
+    // Step 2: Sub-split long fragments at grammatical boundaries
+    let fragments = [];
+    for (const frag of punctSplit) {
+        if (wordCount(frag) <= MAX_GROUP_WORDS) {
+            fragments.push(frag);
+            continue;
+        }
+        // Try each pattern in priority order
+        let subFrags = [frag];
+        for (const pattern of GROUP_SPLIT_PATTERNS) {
+            const newSubFrags = [];
+            for (const sf of subFrags) {
+                if (wordCount(sf) <= MAX_GROUP_WORDS) {
+                    newSubFrags.push(sf);
+                } else {
+                    const parts = sf.split(pattern).map(s => s.trim()).filter(Boolean);
+                    newSubFrags.push(...parts);
+                }
+            }
+            subFrags = newSubFrags;
+        }
+        fragments.push(...subFrags);
+    }
+
+    // Step 3: Hard-split remaining oversize fragments at midpoint
+    let result = [];
+    for (const frag of fragments) {
+        if (wordCount(frag) <= HARD_MAX_GROUP_WORDS) {
+            result.push(frag);
+        } else {
+            const words = frag.split(/\s+/);
+            const mid = Math.ceil(words.length / 2);
+            result.push(words.slice(0, mid).join(' '));
+            result.push(words.slice(mid).join(' '));
+        }
+    }
+
+    // Step 4: Merge too-short fragments with neighbors
+    const merged = [];
+    for (let i = 0; i < result.length; i++) {
+        if (merged.length > 0 && wordCount(result[i]) < MIN_GROUP_WORDS) {
+            // Merge with previous
+            merged[merged.length - 1] += ' ' + result[i];
+        } else {
+            merged.push(result[i]);
+        }
+    }
+    // Check if last fragment is too short — merge backward
+    if (merged.length > 1 && wordCount(merged[merged.length - 1]) < MIN_GROUP_WORDS) {
+        const last = merged.pop();
+        merged[merged.length - 1] += ' ' + last;
+    }
+
+    return merged;
+}
+
+/**
+ * Get word groups for a dictée.
+ * - Uses the manually curated `groupes` array if present.
+ * - Otherwise auto-segments each sentence.
+ * Returns an array of { sentenceIndex, groups[] } objects.
+ */
+export function getWordGroups(dictee) {
+    const sentences = splitIntoSentences(dictee.texte);
+
+    if (Array.isArray(dictee.groupes) && dictee.groupes.length > 0) {
+        // Map manual groups back to sentences.
+        // Strategy: walk through groups, assigning each to the sentence
+        // whose text contains that group's words (in order).
+        return mapGroupsToSentences(sentences, dictee.groupes);
+    }
+
+    // Auto-segment each sentence
+    return sentences.map((sentence, idx) => ({
+        sentenceIndex: idx,
+        sentence,
+        groups: autoSegmentSentence(sentence),
+    }));
+}
+
+/**
+ * Map pre-defined groups to their parent sentences.
+ * Groups are expected to be in document order and cover the full text.
+ */
+function mapGroupsToSentences(sentences, groupes) {
+    const result = [];
+    let groupIdx = 0;
+
+    for (let i = 0; i < sentences.length; i++) {
+        const sentenceGroups = [];
+        // Consume groups that belong to this sentence
+        // A group belongs to sentence i if the sentence contains the group text
+        // (normalized, ignoring leading/trailing punctuation for matching)
+        let remaining = sentences[i];
+        while (groupIdx < groupes.length) {
+            const group = groupes[groupIdx].trim();
+            // Normalize for matching: strip leading/trailing punctuation and spaces
+            const groupCore = group.replace(/^[,;:.!?…\s]+|[,;:.!?…\s]+$/g, '');
+            if (remaining.includes(groupCore)) {
+                sentenceGroups.push(group);
+                // Remove the matched portion from remaining to avoid double-matching
+                const matchPos = remaining.indexOf(groupCore);
+                remaining = remaining.slice(matchPos + groupCore.length);
+                groupIdx++;
+            } else {
+                break;
+            }
+        }
+        result.push({
+            sentenceIndex: i,
+            sentence: sentences[i],
+            groups: sentenceGroups.length > 0 ? sentenceGroups : autoSegmentSentence(sentences[i]),
+        });
+    }
+
+    return result;
+}
+
+/**
+ * Build spoken text for a single word group, verbalizing any trailing punctuation.
+ */
+function buildGroupDictationText(group) {
+    return buildSentenceDictationText(group) || group;
 }
 
 async function speakSentenceWithPunctuation(sentence, speed) {
@@ -238,8 +406,20 @@ export async function runLecture1(runToken) {
 }
 
 // -----------------------------------------------
-// Phase 2 — Dictée effective (phrase par phrase)
+// Phase 2 — Dictée effective (groupe par groupe)
 // -----------------------------------------------
+
+/**
+ * Calculate an adaptive writing pause based on word count.
+ * More words → more time to write. Clamped between 1.5s and 5s.
+ */
+function writingPauseMs(text) {
+    const words = wordCount(text);
+    const baseMs = 1200;
+    const perWordMs = 400;
+    return Math.min(5000, Math.max(1500, baseMs + words * perWordMs));
+}
+
 export async function runDictee(runToken) {
     ensureActiveRun(runToken);
     state.phase = 'dictee';
@@ -254,35 +434,66 @@ export async function runDictee(runToken) {
     await wait(2000);
     ensureActiveRun(runToken);
 
-    // Official Brevet protocol: dictée "phrase par phrase"
-    const phrases = splitIntoSentences(state.currentDictee.texte);
+    // Build word groups organized by sentence
+    const sentenceBlocks = getWordGroups(state.currentDictee);
 
-    for (let i = 0; i < phrases.length; i++) {
+    for (let i = 0; i < sentenceBlocks.length; i++) {
+        const block = sentenceBlocks[i];
+        const groups = block.groups;
+
         ensureActiveRun(runToken);
         state.currentGroupIndex = i;
         await waitForResume();
         ensureActiveRun(runToken);
 
-        setPhaseCounter(`Phrase ${i + 1} / ${phrases.length}`);
-        setCurrentWordText(phrases[i]);
+        setPhaseCounter(`Phrase ${i + 1} / ${sentenceBlocks.length}`);
 
-        // First read
+        // --- 1ère lecture : group by group ---
         state.currentRepeat = 0;
         setRepeatIndicator('1ère lecture');
-        await speakSentenceWithPunctuation(phrases[i], state.dicteeSpeed);
-        ensureActiveRun(runToken);
+
+        for (let g = 0; g < groups.length; g++) {
+            ensureActiveRun(runToken);
+            await waitForResume();
+            ensureActiveRun(runToken);
+
+            setCurrentWordText(groups[g]);
+            const spokenGroup = buildGroupDictationText(groups[g]);
+            await speakAsync(spokenGroup, state.dicteeSpeed);
+            ensureActiveRun(runToken);
+
+            // Adaptive pause for writing — longer for longer groups
+            await wait(writingPauseMs(groups[g]));
+            ensureActiveRun(runToken);
+        }
+
+        // Pause between 1st and 2nd reading of the same sentence
         await wait(2500);
         ensureActiveRun(runToken);
-
         await waitForResume();
         ensureActiveRun(runToken);
 
-        // Second read
+        // --- 2ème lecture : group by group ---
         state.currentRepeat = 1;
         setRepeatIndicator('2ème lecture');
-        await speakSentenceWithPunctuation(phrases[i], state.dicteeSpeed);
-        ensureActiveRun(runToken);
-        await wait(3500);
+
+        for (let g = 0; g < groups.length; g++) {
+            ensureActiveRun(runToken);
+            await waitForResume();
+            ensureActiveRun(runToken);
+
+            setCurrentWordText(groups[g]);
+            const spokenGroup = buildGroupDictationText(groups[g]);
+            await speakAsync(spokenGroup, state.dicteeSpeed);
+            ensureActiveRun(runToken);
+
+            // Slightly longer pause on 2nd read for corrections
+            await wait(writingPauseMs(groups[g]) + 500);
+            ensureActiveRun(runToken);
+        }
+
+        // Pause between sentences
+        await wait(3000);
     }
 
     hideCurrentWordDisplay();

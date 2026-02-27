@@ -174,7 +174,7 @@ export function renderDicteeGrid(dictees, onSelect) {
 // getDictationSegments and buildAnnouncements are passed from main.js
 // to avoid importing exam-flow.js here (would be circular).
 // -----------------------------------------------
-export async function selectDictee(dictee, { getDictationSegments, buildAnnouncements }) {
+export async function selectDictee(dictee, { getWordGroupsFn, buildGroupText, buildAnnouncements }) {
     state.currentDictee = dictee;
     state.phase = 'idle';
     state.currentGroupIndex = 0;
@@ -204,7 +204,8 @@ export async function selectDictee(dictee, { getDictationSegments, buildAnnounce
 
     try {
         await pregenerate(dictee, {
-            getDictationSegments,
+            getWordGroupsFn,
+            buildGroupText,
             buildAnnouncements,
             onProgress: (current, total) => {
                 $('phase-description').textContent = `Pré-génération audio en cours... ${current}/${total}`;

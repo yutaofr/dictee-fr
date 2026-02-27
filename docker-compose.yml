@@ -7,6 +7,7 @@ services:
       - ./index.html:/app/index.html:ro
       - ./style.css:/app/style.css:ro
       - ./app.js:/app/app.js:ro
+      - ./src:/app/src:ro
       - ./dictees.js:/app/dictees.js:ro
       - ./server.js:/app/server.js:ro
     environment:

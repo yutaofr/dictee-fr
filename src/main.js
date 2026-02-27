@@ -4,7 +4,7 @@
 // Import order (bottom-up, dependencies first):
 //   state → tts → correction → exam-flow → ui → main
 
-import { startExam, skipPhase, getDictationSpeechSegments, buildPhaseAnnouncements } from './exam-flow.js';
+import { startExam, skipPhase, getDictationSpeechSegments, buildPhaseAnnouncements, getWordGroups, buildSentenceDictationText } from './exam-flow.js';
 import { goToCorrection } from './correction.js';
 import {
     renderDicteeGrid,
@@ -63,9 +63,12 @@ async function init() {
     }
 
     // Render the dictée selection grid
+    const buildGroupText = (group) => buildSentenceDictationText(group) || group;
+
     const onSelect = (dictee) => {
         selectDictee(dictee, {
-            getDictationSegments: getDictationSpeechSegments,
+            getWordGroupsFn: getWordGroups,
+            buildGroupText,
             buildAnnouncements: buildPhaseAnnouncements,
         });
     };
