@@ -164,7 +164,11 @@ export async function pregenerate(dictee, { getDictationSegments, buildAnnouncem
 
     const announcements = buildAnnouncements(dictee);
     const { dictationSegments } = getDictationSegments(dictee.texte);
+    const dictSpeed = state.dicteeSpeed;
 
+    // Segments and their target generation speed:
+    //   announcements (lecture1, dictee, relecture) → always 1.0
+    //   dictation content (full text + sentence segments) → dicteeSpeed
     const segments = [
         announcements.lecture1,
         dictee.texte,
@@ -172,11 +176,18 @@ export async function pregenerate(dictee, { getDictationSegments, buildAnnouncem
         ...dictationSegments,
         announcements.relecture,
     ];
+    const speeds = [
+        1.0,                                      // lecture1 announcement
+        dictSpeed,                                // full text reading
+        1.0,                                      // dictee announcement
+        ...dictationSegments.map(() => dictSpeed),// sentence-by-sentence
+        1.0,                                      // relecture announcement
+    ];
 
     state.pregenTotal = segments.length;
     state.pregenProgress = 0;
 
-    console.log(`[TTS] Pre-generating ${segments.length} audio segments...`);
+    console.log(`[TTS] Pre-generating ${segments.length} audio segments at speed ${dictSpeed}...`);
     onProgress(0, segments.length);
 
     for (let i = 0; i < segments.length; i++) {
@@ -187,7 +198,7 @@ export async function pregenerate(dictee, { getDictationSegments, buildAnnouncem
         }
 
         try {
-            await fetchTTSAudio(segments[i], 1.0);
+            await fetchTTSAudio(segments[i], speeds[i]);
             state.pregenProgress = i + 1;
             onProgress(i + 1, segments.length);
         } catch (e) {
