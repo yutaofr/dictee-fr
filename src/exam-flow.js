@@ -289,9 +289,44 @@ function buildGroupDictationText(group) {
     return buildSentenceDictationText(group) || group;
 }
 
-async function speakSentenceWithPunctuation(sentence, speed) {
-    const spokenSentence = buildSentenceDictationText(sentence) || sentence;
-    await speakAsync(spokenSentence, speed);
+/**
+ * Split an array of word groups into clause segments using any punctuation mark as a boundary.
+ * A new segment starts immediately after a group whose text ends with a punctuation character.
+ * The final group (including sentence-ending punctuation) always closes the last segment.
+ *
+ * @param {string[]} groups - word groups for a single sentence
+ * @returns {string[][]} - array of segments, each segment is an array of word groups
+ *
+ * @example
+ * // ['La mer', 'furieuse,', 'rugissait.'] → [['La mer', 'furieuse,'], ['rugissait.']]
+ */
+export function splitGroupsIntoClauseSegments(groups) {
+    if (groups.length === 0) return [];
+
+    const CLAUSE_PUNCT_RE = /[,;:…!?.]/;
+
+    const segments = [];
+    let current = [];
+
+    for (const group of groups) {
+        current.push(group);
+        // If this group ends with any punctuation AND it is not the very last group,
+        // close the current segment now.
+        const trimmed = group.trimEnd();
+        const lastChar = trimmed.slice(-1);
+        const isLast = group === groups[groups.length - 1];
+        if (CLAUSE_PUNCT_RE.test(lastChar) && !isLast) {
+            segments.push(current);
+            current = [];
+        }
+    }
+
+    // Always push whatever remains (including the sentence-ending punctuation group)
+    if (current.length > 0) {
+        segments.push(current);
+    }
+
+    return segments;
 }
 
 // -----------------------------------------------
@@ -326,7 +361,7 @@ export function buildPhaseAnnouncements(dictee) {
 
     return {
         lecture1: `Phase un. Lecture intégrale. Écoutez le texte sans écrire. Le texte s'intitule ${dictee.titre}, de ${dictee.auteur}, environ ${signCount} signes sans les espaces. ${keyPointsText}`,
-        dictee: "Phase deux. Dictée. Chaque phrase sera lue deux fois, en marquant et en annonçant la ponctuation. Écrivez pendant la dictée, puis relisez chaque phrase.",
+        dictee: "Phase deux. Dictée. Chaque groupe de mots est lu une première fois, puis immédiatement répété une deuxième fois. Profitez de chaque répétition pour écrire et vérifier.",
         relecture: "Phase trois. Relecture. Le texte est relu une dernière fois, de façon continue, sans annoncer la ponctuation, pour vérifier et corriger votre copie.",
     };
 }
@@ -448,51 +483,66 @@ export async function runDictee(runToken) {
 
         setPhaseCounter(`Phrase ${i + 1} / ${sentenceBlocks.length}`);
 
-        // --- 1ère lecture : group by group ---
-        state.currentRepeat = 0;
-        setRepeatIndicator('1ère lecture');
+        // Split the sentence's word groups into clause segments.
+        // Each segment ends at an intra-sentence punctuation mark (comma, semicolon, etc.)
+        // so we repeat that smaller chunk immediately before moving on.
+        const clauseSegments = splitGroupsIntoClauseSegments(groups);
 
-        for (let g = 0; g < groups.length; g++) {
+        for (const segmentGroups of clauseSegments) {
             ensureActiveRun(runToken);
             await waitForResume();
             ensureActiveRun(runToken);
 
-            setCurrentWordText(groups[g]);
-            const spokenGroup = buildGroupDictationText(groups[g]);
-            await speakAsync(spokenGroup, state.dicteeSpeed);
-            ensureActiveRun(runToken);
+            // --- 1ère lecture du segment ---
+            state.currentRepeat = 0;
+            setRepeatIndicator('1ère lecture');
 
-            // Adaptive pause for writing — longer for longer groups
-            await wait(writingPauseMs(groups[g]));
-            ensureActiveRun(runToken);
-        }
+            for (const group of segmentGroups) {
+                ensureActiveRun(runToken);
+                await waitForResume();
+                ensureActiveRun(runToken);
 
-        // Pause between 1st and 2nd reading of the same sentence
-        await wait(2500);
-        ensureActiveRun(runToken);
-        await waitForResume();
-        ensureActiveRun(runToken);
+                setCurrentWordText(group);
+                const spokenGroup = buildGroupDictationText(group);
+                await speakAsync(spokenGroup, state.dicteeSpeed);
+                ensureActiveRun(runToken);
 
-        // --- 2ème lecture : group by group ---
-        state.currentRepeat = 1;
-        setRepeatIndicator('2ème lecture');
+                // Adaptive pause for writing after each group
+                await wait(writingPauseMs(group));
+                ensureActiveRun(runToken);
+            }
 
-        for (let g = 0; g < groups.length; g++) {
+            // Short pause between 1st and 2nd reading of this clause segment
+            await wait(1500);
             ensureActiveRun(runToken);
             await waitForResume();
             ensureActiveRun(runToken);
 
-            setCurrentWordText(groups[g]);
-            const spokenGroup = buildGroupDictationText(groups[g]);
-            await speakAsync(spokenGroup, state.dicteeSpeed);
-            ensureActiveRun(runToken);
+            // --- 2ème lecture du segment ---
+            state.currentRepeat = 1;
+            setRepeatIndicator('2ème lecture');
 
-            // Slightly longer pause on 2nd read for corrections
-            await wait(writingPauseMs(groups[g]) + 500);
+            for (const group of segmentGroups) {
+                ensureActiveRun(runToken);
+                await waitForResume();
+                ensureActiveRun(runToken);
+
+                setCurrentWordText(group);
+                const spokenGroup = buildGroupDictationText(group);
+                await speakAsync(spokenGroup, state.dicteeSpeed);
+                ensureActiveRun(runToken);
+
+                // Slightly longer pause on 2nd read for corrections
+                await wait(writingPauseMs(group) + 500);
+                ensureActiveRun(runToken);
+            }
+
+            // Pause between clause segments within the same sentence
+            await wait(2000);
             ensureActiveRun(runToken);
         }
 
-        // Pause between sentences
+        // Longer pause between sentences
         await wait(3000);
     }
 

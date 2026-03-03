@@ -11,6 +11,7 @@ import {
     buildSentenceDictationText,
     autoSegmentSentence,
     getWordGroups,
+    splitGroupsIntoClauseSegments,
     PUNCTUATION_RULES,
 } from '../exam-flow.js';
 
@@ -256,6 +257,71 @@ describe('autoSegmentSentence', () => {
             const normalizeWs = s => s.replace(/\s+/g, ' ').trim();
             expect(normalizeWs(reconstructed)).toBe(normalizeWs(sentence));
         }
+    });
+});
+
+// -----------------------------------------------
+// splitGroupsIntoClauseSegments
+// -----------------------------------------------
+describe('splitGroupsIntoClauseSegments', () => {
+    it('returns one segment for groups with no internal punctuation', () => {
+        const groups = ['Le petit Marcel', 'marchait dans les collines', 'vers la rivière'];
+        const result = splitGroupsIntoClauseSegments(groups);
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(groups);
+    });
+
+    it('splits at a group ending with a comma', () => {
+        // groups: [A, B,, C, D.]
+        const groups = ['La mer', 'furieuse,', 'rugissait au loin', 'dans la nuit.'];
+        const result = splitGroupsIntoClauseSegments(groups);
+        expect(result).toHaveLength(2);
+        expect(result[0]).toEqual(['La mer', 'furieuse,']);
+        expect(result[1]).toEqual(['rugissait au loin', 'dans la nuit.']);
+    });
+
+    it('splits at semicolons and colons', () => {
+        const groups = ['Elle chantait ;', 'il jouait du piano.'];
+        const result = splitGroupsIntoClauseSegments(groups);
+        expect(result).toHaveLength(2);
+        expect(result[0]).toEqual(['Elle chantait ;']);
+        expect(result[1]).toEqual(['il jouait du piano.']);
+    });
+
+    it('splits at ellipsis', () => {
+        const groups = ['Il hésita…', 'puis repartit.'];
+        const result = splitGroupsIntoClauseSegments(groups);
+        expect(result).toHaveLength(2);
+        expect(result[0]).toEqual(['Il hésita…']);
+        expect(result[1]).toEqual(['puis repartit.']);
+    });
+
+    it('sentence ending with period is one segment when no internal punctuation', () => {
+        const groups = ['Il fait beau', 'le soleil brille.'];
+        const result = splitGroupsIntoClauseSegments(groups);
+        // Period is at the end of the last group only, so only one segment after last punctuation
+        expect(result).toHaveLength(1);
+        expect(result[0]).toEqual(['Il fait beau', 'le soleil brille.']);
+    });
+
+    it('handles multiple commas producing multiple segments', () => {
+        const groups = ['Ce matin-là,', 'Jacques avait enfilé', 'ses vêtements neufs,', 'avec une émotion', "qu'il n'arrivait pas à dissimuler."];
+        const result = splitGroupsIntoClauseSegments(groups);
+        expect(result).toHaveLength(3);
+        expect(result[0]).toEqual(['Ce matin-là,']);
+        expect(result[1]).toEqual(['Jacques avait enfilé', 'ses vêtements neufs,']);
+        expect(result[2]).toEqual(['avec une émotion', "qu'il n'arrivait pas à dissimuler."]);
+    });
+
+    it('returns empty array for empty input', () => {
+        expect(splitGroupsIntoClauseSegments([])).toEqual([]);
+    });
+
+    it('roundtrip: flattening segments gives original groups', () => {
+        const groups = ['La neige tombait,', 'recouvrant les toits', 'et les chemins.'];
+        const segments = splitGroupsIntoClauseSegments(groups);
+        const flat = segments.flat();
+        expect(flat).toEqual(groups);
     });
 });
 
