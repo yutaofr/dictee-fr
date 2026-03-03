@@ -13,19 +13,22 @@ The application uses a **hybrid architecture** to balance modern web accessibili
 graph TD
     Client["Browser (Vanilla JS)"] -- "[HTTP/JSON]" --> WebServer["Node.js Proxy (Docker)"]
     WebServer -- "[HTTP/JSON] host.docker.internal:8000" --> TTSServer["FastAPI Server (Native Mac)"]
-    TTSServer -- "[Metal Framework]" --> MLX["Kokoro-82M MLX Model"]
-    MLX -- "[Float32 PCM]" --> TTSServer
+    TTSServer -- "[KPipeline]" --> PyTorch["Kokoro v1.0 (PyTorch+MPS)"]
+    PyTorch -- "[Metal GPU / espeak-ng G2P]" --> TTSServer
     TTSServer -- "[WAV Buffer]" --> WebServer
     WebServer -- "[WAV Binary]" --> Client
 ```
 
 ### 2. Component Breakdown
 
-#### **A. TTS Engine (Local MLX)**
-- **Model**: `mlx-community/Kokoro-82M-bf16`.
-- **Reasoning**: Chosen for natural human-like prosody and near-instant inference (82M params) on Apple Silicon.
-- **Implementation**: Custom FastAPI server (`tts_server.py`) bypassing the built-in `mlx_audio.server` due to model-type detection bugs for specific variants.
-- **Hardware Access**: Must run **natively on host Mac OS** to access the Metal Performance Shaders (MPS) via the MLX framework. Docker cannot access the Apple GPU.
+#### **A. TTS Engine (Local PyTorch MPS)**
+- **Model**: `hexgrad/Kokoro-82M` (Kokoro v1.0, January 2025).
+- **Package**: `kokoro>=0.9.4` — `KPipeline(lang_code='f')` API.
+- **G2P**: `misaki[en]` + `espeak-ng` (fr-fr) — native French phoneme generation.
+- **Reasoning**: v1.0 offers significantly improved French pronunciation quality.
+- **Implementation**: Custom FastAPI server (`tts_server.py`) using PyTorch + MPS.
+- **Hardware Access**: Must run **natively on host Mac OS** to access the Metal Performance Shaders (MPS) via PyTorch. Set `PYTORCH_ENABLE_MPS_FALLBACK=1`. Docker cannot access the Apple GPU.
+- **Runtime**: Python 3.12 venv (`.venv-tts`) — `kokoro` requires Python < 3.13.
 
 #### **B. Web Backend (Proxy/Caching)**
 - **Environment**: Node.js (Alpine) running in **Docker**.
@@ -68,7 +71,7 @@ The logic in `src/exam-flow.js` is strictly aligned with the official French "Di
 - **Format**:
     ```json
     {
-      "model": "mlx-community/Kokoro-82M-bf16",
+      "model": "hexgrad/Kokoro-82M",
       "input": "Text to synthesize",
       "voice": "ff_siwis",
       "speed": 0.9,
@@ -131,14 +134,14 @@ The application's primary value is its alignment with the **Official Brevet 2026
 - **Communication**: Docker reaches the host via `host.docker.internal:8000`.
 
 ### 3. Voice Consistency
-- **Preferred Model**: `Kokoro-82M-bf16`.
-- **Reason**: Superior speed/quality ratio for French education.
+- **Preferred Model**: `hexgrad/Kokoro-82M` (Kokoro v1.0).
+- **Reason**: Superior French G2P via `espeak-ng fr-fr` and more training data.
 - **Constraint**: If changed, parity must be maintained between `tts_server.py` (Python) and `server.js` (Node.js/Proxy).
 
 ### 4. Language Code
 - **French Protocol**: Always use `lang_code: "f"` for Kokoro and `language: "French"` for Qwen to ensure proper phoneme generation.
 
 ### 5. Deployment Rule
-- Run TTS server natively: `./tts_server.sh`.
+- Run TTS server natively: `./tts_server.sh` (auto-activates `.venv-tts` Python 3.12).
 - Run Web app via Docker: `docker-compose up`.
 - Or run both with orchestrator: `./dev_stack.sh start npm|docker`.

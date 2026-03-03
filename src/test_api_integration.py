@@ -19,7 +19,7 @@ try:
         assert response.status_code == 200
         data = response.json()
         models = [m["id"] for m in data["data"]]
-        assert "mlx-community/Kokoro-82M-bf16" in models
+        assert "hexgrad/Kokoro-82M" in models
         assert "mlx-community/Qwen2.5-3B-Instruct-4bit" in models
         print("test_list_models passed")
 
