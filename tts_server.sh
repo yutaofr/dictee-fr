@@ -70,7 +70,7 @@ fi
 # -----------------------------------------------
 # 4. Install Python dependencies if needed
 # -----------------------------------------------
-for pkg in kokoro fastapi uvicorn; do
+for pkg in kokoro mlx-lm fastapi uvicorn; do
     if ! python -c "import ${pkg//-/_}" 2>/dev/null; then
         echo "[TTS] Installing $pkg..."
         pip install "$pkg"
