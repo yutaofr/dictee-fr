@@ -23,7 +23,7 @@ const TTS_ENDPOINT = `${TTS_SERVER_URL}/v1/audio/speech`;
 const GENERATE_ENDPOINT = `${TTS_SERVER_URL}/api/generate`;
 
 // Kokoro TTS model — extremely natural, human-like speech
-const TTS_MODEL = 'mlx-community/Kokoro-82M-bf16';
+const TTS_MODEL = 'hexgrad/Kokoro-82M';
 
 // Voice: ff_siwis is a French female voice
 const TTS_VOICE = 'ff_siwis';

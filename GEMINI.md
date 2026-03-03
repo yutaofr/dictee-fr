@@ -7,7 +7,9 @@
 - **Frontend:** Vanilla JavaScript, HTML5, CSS3 (Modular ES Modules).
 - **Backend:** Node.js (Express) acting as a caching proxy and static file server.
 - **Testing:** Vitest (Unit testing for core logic).
-- **TTS Engine:** Python (FastAPI) + `mlx-audio` (Kokoro-82M-bf16 model).
+- **TTS Engine:** Python (FastAPI) + `kokoro>=0.9.4` (`KPipeline`) + `espeak-ng` (fr-fr G2P).
+- **TTS Model:** `hexgrad/Kokoro-82M` (Kokoro v1.0, PyTorch + MPS on Apple Silicon).
+- **Runtime:** Python 3.12 venv (`.venv-tts`) — `kokoro` requires Python < 3.13.
 - **Infrastructure:** Docker (for web app) and native host execution (for Metal GPU access).
 
 ---
