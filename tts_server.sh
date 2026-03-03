@@ -7,6 +7,7 @@
 #
 # TTS Engine: Kokoro v1.0 (hexgrad/Kokoro-82M) via PyTorch + MPS
 # G2P: misaki + espeak-ng (fr-fr)
+# Python: 3.12 (via .venv-tts) — kokoro requires Python < 3.13
 #
 # First run: downloads model files from Hugging Face cache.
 # Subsequent runs: model is cached in ~/.cache/huggingface/
@@ -19,6 +20,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv-tts"
+PYTHON_3_12="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 # -----------------------------------------------
 # 1. Check system dependency: espeak-ng
@@ -35,32 +38,53 @@ fi
 echo "[TTS] ✓ espeak-ng found: $(espeak-ng --version 2>&1 | head -1)"
 
 # -----------------------------------------------
-# 2. Free port 8000 if occupied
+# 2. Bootstrap Python 3.12 venv (kokoro requires Python < 3.13)
+# -----------------------------------------------
+if [ ! -f "$VENV_DIR/bin/python" ]; then
+    echo "[TTS] Creating Python 3.12 virtual environment at .venv-tts ..."
+    if [ ! -x "$PYTHON_3_12" ]; then
+        echo "[TTS] ❌ ERROR: Python 3.12 not found at $PYTHON_3_12"
+        echo "[TTS]    Install it from https://www.python.org/downloads/ or via:"
+        echo ""
+        echo "       brew install python@3.12"
+        echo ""
+        exit 1
+    fi
+    "$PYTHON_3_12" -m venv "$VENV_DIR"
+    echo "[TTS] ✓ Virtual environment created."
+fi
+
+# Activate the venv for all subsequent commands
+source "$VENV_DIR/bin/activate"
+echo "[TTS] ✓ Python: $(python --version) (from .venv-tts)"
+
+# -----------------------------------------------
+# 3. Free port 8000 if occupied
 # -----------------------------------------------
 if lsof -i :8000 -t >/dev/null; then
     echo "[TTS] Port 8000 is occupied. Cleaning up..."
     kill -9 $(lsof -t -i :8000) 2>/dev/null || true
-    sleep 1 # Wait for the port to be fully released
+    sleep 1
 fi
 
 # -----------------------------------------------
-# 3. Install Python dependencies if needed
+# 4. Install Python dependencies if needed
 # -----------------------------------------------
 for pkg in kokoro fastapi uvicorn; do
-    if ! python3 -c "import ${pkg//-/_}" 2>/dev/null; then
+    if ! python -c "import ${pkg//-/_}" 2>/dev/null; then
         echo "[TTS] Installing $pkg..."
         pip install "$pkg"
     fi
 done
 
-# misaki[en] is imported as 'misaki', check separately
-if ! python3 -c "import misaki" 2>/dev/null; then
+# misaki[en] uses extras syntax — check and install separately
+if ! python -c "import misaki" 2>/dev/null; then
     echo "[TTS] Installing misaki[en]..."
     pip install "misaki[en]"
 fi
 
 # -----------------------------------------------
-# 4. Enable PyTorch MPS (Apple Silicon Metal GPU)
+# 5. Enable PyTorch MPS (Apple Silicon Metal GPU)
 # -----------------------------------------------
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 
@@ -71,4 +95,4 @@ echo "[TTS] First run downloads model files — please wait."
 echo "[TTS] Web app: http://localhost:8081"
 echo ""
 
-python3 "$SCRIPT_DIR/tts_server.py"
+python "$SCRIPT_DIR/tts_server.py"
